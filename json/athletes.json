@@ -1,0 +1,66 @@
+[
+    {
+        "_id": "1",
+        "name": "John Doe",
+        "age": 25,
+        "sport": "Track and Field",
+        "country": "USA",
+        "doping_test_results": [
+            {
+                "test_id": "T12345",
+                "date": "2024-05-01",
+                "result": "Negative",
+                "substances_tested": ["Testosterone", "EPO"]
+            },
+            {
+                "test_id": "T12346",
+                "date": "2024-06-01",
+                "result": "Positive",
+                "substances_tested": ["Caffeine", "Stimulants"]
+            }
+        ],
+        "supplements": [
+            {
+                "name": "Protein Powder",
+                "brand": "ProteinCo",
+                "contains_banned_substances": false,
+                "recommended_by": "Coach"
+            },
+            {
+                "name": "Pre-Workout",
+                "brand": "BoostUp",
+                "contains_banned_substances": true,
+                "banned_substance_detected": "Sarm"
+            }
+        ]
+    },
+    {
+        "_id": "2",
+        "name": "Jane Smith",
+        "age": 22,
+        "sport": "Swimming",
+        "country": "Australia",
+        "doping_test_results": [
+            {
+                "test_id": "T12347",
+                "date": "2024-04-15",
+                "result": "Negative",
+                "substances_tested": ["Caffeine", "Beta-Alanine"]
+            }
+        ],
+        "supplements": [
+            {
+                "name": "Fish Oil",
+                "brand": "OmegaPro",
+                "contains_banned_substances": false,
+                "recommended_by": "Nutritionist"
+            },
+            {
+                "name": "BCAA",
+                "brand": "MusclePro",
+                "contains_banned_substances": false,
+                "recommended_by": "Coach"
+            }
+        ]
+    }
+]

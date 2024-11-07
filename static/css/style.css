@@ -1,0 +1,83 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f9;
+    margin: 0;
+    padding: 0;
+}
+
+header {
+    background-color: #004d99;
+    color: white;
+    text-align: center;
+    padding: 1rem;
+}
+
+h1 {
+    margin: 0;
+}
+
+.menu {
+    margin: 20px 0;
+    text-align: center;
+}
+
+.menu a {
+    padding: 10px 20px;
+    background-color: #006bb3;
+    color: white;
+    text-decoration: none;
+    margin: 0 10px;
+    border-radius: 5px;
+}
+
+.menu a:hover {
+    background-color: #005c99;
+}
+
+.main-content {
+    text-align: center;
+    padding: 50px 0;
+}
+
+.podcast-list, .resources-list {
+    padding: 20px;
+    max-width: 900px;
+    margin: 20px auto;
+}
+
+.podcast-item, .resource-item {
+    background-color: white;
+    border: 1px solid #ddd;
+    margin-bottom: 10px;
+    padding: 15px;
+    border-radius: 5px;
+}
+
+.podcast-item h4, .resource-item h4 {
+    margin-top: 0;
+    color: #333;
+}
+
+.podcast-item p, .resource-item p {
+    font-size: 1rem;
+    color: #666;
+}
+
+.podcast-item a, .resource-item a {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 10px 20px;
+    background-color: #004d99;
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+}
+
+.podcast-item a:hover, .resource-item a:hover {
+    background-color: #006bb3;
+}
+
+/* Active link styling */
+.menu a.active {
+    background-color: #003366;
+}

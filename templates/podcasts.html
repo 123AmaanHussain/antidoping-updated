@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Podcasts</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Podcasts on Anti-Doping</h1>
+    </header>
+
+    <div class="podcast-list">
+        <div class="podcast-item">
+            <h4>Understanding Anti-Doping Regulations</h4>
+            <p>A deep dive into anti-doping regulations for athletes.</p>
+            <a href="https://linktothepodcast.com/episode1" target="_blank">Listen Now</a>
+        </div>
+
+        <div class="podcast-list">
+            {% for podcast in podcasts %}
+            <div class="podcast-item">
+                <h4 class="podcast-title">{{ podcast.title }}</h4>
+                <p class="podcast-description" style="display: none;">{{ podcast.description }}</p>
+                <a href="{{ podcast.episode_url }}" target="_blank">Listen Now</a>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <div class="podcast-item">
+            <h4>The Role of Coaches in Preventing Doping</h4>
+            <p>A discussion on how coaches can educate athletes about anti-doping.</p>
+            <a href="https://linktothepodcast.com/episode2" target="_blank">Listen Now</a>
+        </div>
+        <!-- Add more podcasts here -->
+    </div>
+
+    <div class="menu">
+        <a href="/">Back to Home</a>
+    </div>
+</body>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+</html>
