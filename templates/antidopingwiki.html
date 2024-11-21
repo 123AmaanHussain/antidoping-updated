@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anti-Doping Wiki & News</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <header>
+        <h1><i class="fas fa-newspaper"></i> Anti-Doping Wiki & News</h1>
+        <p>Stay updated with the latest news in sports and anti-doping</p>
+    </header>
+
+    <nav class="menu">
+        <a href="/"><i class="fas fa-home"></i> Home</a>
+        <a href="/antidopingwiki" class="active"><i class="fas fa-book-reader"></i> Anti-Doping Wiki</a>
+        <a href="/caloriescalculator"><i class="fas fa-calculator"></i> Calories</a>
+        <a href="/ai_coach"><i class="fas fa-robot"></i> AI Coach</a>
+        <a href="/games"><i class="fas fa-gamepad"></i> Games</a>
+    </nav>
+
+    <div class="wiki-container">
+        <div class="news-filters">
+            <button class="filter-btn active" data-category="all">All News</button>
+            <button class="filter-btn" data-category="Doping News">Doping News</button>
+            <button class="filter-btn" data-category="Sports News">Sports News</button>
+        </div>
+
+        <div class="news-grid">
+            {% for article in news %}
+            <div class="news-card" data-category="{{ article.category }}">
+                <div class="news-image">
+                    {% if article.image %}
+                    <img src="{{ article.image }}" alt="{{ article.title }}">
+                    {% else %}
+                    <div class="placeholder-image">
+                        <i class="fas fa-newspaper"></i>
+                    </div>
+                    {% endif %}
+                    <span class="news-category">{{ article.category }}</span>
+                </div>
+                <div class="news-content">
+                    <div class="news-meta">
+                        <span class="news-source"><i class="fas fa-globe"></i> {{ article.source }}</span>
+                        <span class="news-date"><i class="far fa-calendar-alt"></i> {{ article.publishedAt }}</span>
+                    </div>
+                    <h2 class="news-title">{{ article.title }}</h2>
+                    <p class="news-description">{{ article.description }}</p>
+                    <a href="{{ article.url }}" target="_blank" class="read-more">Read More <i class="fas fa-arrow-right"></i></a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2024 Anti-Doping Education Platform. All rights reserved.</p>
+    </footer>
+
+    <script>
+        // News filtering functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterBtns = document.querySelectorAll('.filter-btn');
+            const newsCards = document.querySelectorAll('.news-card');
+
+            filterBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Remove active class from all buttons
+                    filterBtns.forEach(b => b.classList.remove('active'));
+                    // Add active class to clicked button
+                    btn.classList.add('active');
+
+                    const category = btn.getAttribute('data-category');
+
+                    newsCards.forEach(card => {
+                        if (category === 'all' || card.getAttribute('data-category') === category) {
+                            card.style.display = 'block';
+                            setTimeout(() => {
+                                card.style.opacity = '1';
+                                card.style.transform = 'translateY(0)';
+                            }, 100);
+                        } else {
+                            card.style.opacity = '0';
+                            card.style.transform = 'translateY(20px)';
+                            setTimeout(() => {
+                                card.style.display = 'none';
+                            }, 300);
+                        }
+                    });
+                });
+            });
+        });
+    </script>
+</body>
+</html>

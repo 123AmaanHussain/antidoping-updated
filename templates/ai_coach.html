@@ -1,0 +1,61 @@
+<link href="//maxcdn.bootstrapcdn.com/bootstrap/4.1.1/css/bootstrap.min.css" rel="stylesheet" />
+<script src="//maxcdn.bootstrapcdn.com/bootstrap/4.1.1/js/bootstrap.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>AI Coach Chatbot</title>
+  <style>
+    body { font-family: Arial, sans-serif; background-color: #f4f4f4; }
+    #chatbox { width: 500px; margin: 50px auto; padding: 20px; background: #fff; border-radius: 5px; }
+    #chatlog { height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; }
+    .user, .bot { margin: 10px 0; }
+    .user { text-align: right; }
+    .user .message { display: inline-block; background: #dcf8c6; padding: 10px; border-radius: 5px; }
+    .bot .message { display: inline-block; background: #f1f0f0; padding: 10px; border-radius: 5px; }
+    #userInput { width: calc(100% - 100px); padding: 10px; }
+    #sendButton { width: 80px; padding: 10px; }
+  </style>
+</head>
+<body>
+  <div id="chatbox">
+    <h2>AI Coach Chatbot</h2>
+    <div id="chatlog"></div>
+    <input id="userInput" type="text" placeholder="Type your message here..." />
+    <button id="sendButton">Send</button>
+  </div>
+
+  <script>
+    function displayMessage(message, sender) {
+      const messageElement = document.createElement('div');
+      messageElement.className = sender;
+      messageElement.innerHTML = `<div class="message">${message}</div>`;
+      document.getElementById('chatlog').appendChild(messageElement);
+      document.getElementById('chatlog').scrollTop = document.getElementById('chatlog').scrollHeight;
+    }
+
+    function sendMessage() {
+      const userInput = document.getElementById('userInput').value;
+      displayMessage(userInput, 'user');
+      document.getElementById('userInput').value = '';
+
+      $.post('/get_response', { msg: userInput }, function(response) {
+        displayMessage(response, 'bot');
+      });
+    }
+
+    // Load the default conversation on page load
+    $(document).ready(function() {
+      $.get('/get_default_conversation', function(conversation) {
+        conversation.forEach((message, index) => {
+          setTimeout(() => displayMessage(message, 'bot'), index * 2000);
+        });
+      });
+
+      // Attach event listener to send button
+      $('#sendButton').click(sendMessage);
+    });
+  </script>
+</body>
+</html>

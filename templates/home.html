@@ -5,28 +5,79 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Anti-Doping Awareness</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
     <header>
-        <h1>Welcome to Anti-Doping Education</h1>
+        <h1><i class="fas fa-shield-alt"></i> Anti-Doping Education Platform</h1>
+        <p>Empowering athletes with knowledge for clean sports</p>
     </header>
 
-    <div class="menu">
-        <a href="/podcasts">Podcasts</a>
-        <a href="/anti_doping">Anti-Doping Resources</a>
-        <!-- You can add more links here -->
-    </div>
+    <nav class="menu">
+        <a href="/" class="active"><i class="fas fa-home"></i> Home</a>
+        <a href="/antidopingwiki"><i class="fas fa-book-reader"></i> Anti-Doping Wiki</a>
+        <a href="/caloriescalculator"><i class="fas fa-calculator"></i> Calories</a>
+        <a href="/ai_coach"><i class="fas fa-robot"></i> AI Coach</a>
+        <a href="/games"><i class="fas fa-gamepad"></i> Games</a>
+    </nav>
 
     <div class="main-content">
-        <p>Explore the available resources and information on anti-doping practices and clean sports.</p>
-        <button id="welcome-button">Click for Welcome Message</button>
+        <div class="hero-section">
+            <h2>Your Journey to Clean Sports Starts Here</h2>
+            <p>Explore our comprehensive resources and tools designed to support your athletic journey while maintaining the integrity of sports.</p>
+            <button id="welcome-button"><i class="fas fa-play"></i> Get Started</button>
+        </div>
     </div>
-    
 
-    <div class="main-content">
-        <p>Explore the available resources and information on anti-doping practices and clean sports.</p>
+    <div class="features">
+        <div class="feature ai-coach">
+            <i class="fas fa-robot fa-3x"></i>
+            <h2>AI Coach</h2>
+            <p>Get personalized guidance on anti-doping, fitness, and health from our intelligent AI coach.</p>
+            <a href="/ai_coach" class="feature-link">Start Training</a>
+        </div>
+        
+        <div class="feature">
+            <i class="fas fa-gamepad fa-3x"></i>
+            <h2>Educational Games</h2>
+            <p>Learn about anti-doping through interactive games and earn certificates through our quiz system.</p>
+            <a href="/games" class="feature-link">Play & Learn</a>
+        </div>
+        
+        <div class="feature">
+            <i class="fas fa-book-reader fa-3x"></i>
+            <h2>Digital Resources</h2>
+            <p>Access our comprehensive collection of anti-doping resources, podcasts, and educational materials.</p>
+            <a href="/antidopingwiki" class="feature-link">Explore Resources</a>
+        </div>
+
+        <div class="feature">
+            <i class="fas fa-user-circle fa-3x"></i>
+            <h2>Digital Twin</h2>
+            <p>Track your performance metrics and get personalized recommendations for improvement.</p>
+            <a href="/digitaltwin" class="feature-link">View Profile</a>
+        </div>
+
+        <div class="feature">
+            <i class="fas fa-calculator fa-3x"></i>
+            <h2>Calories Calculator</h2>
+            <p>Calculate your daily caloric needs based on your activity level and goals.</p>
+            <a href="/caloriescalculator" class="feature-link">Calculate Now</a>
+        </div>
+
+        <div class="feature">
+            <i class="fas fa-qrcode fa-3x"></i>
+            <h2>Smart Labels</h2>
+            <p>Scan supplement labels to check for banned substances and get detailed information.</p>
+            <a href="/smartlabels" class="feature-link">Scan Labels</a>
+        </div>
     </div>
+
+    <footer>
+        <p>&copy; 2024 Anti-Doping Education Platform. All rights reserved.</p>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/js/all.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
-
 </html>
