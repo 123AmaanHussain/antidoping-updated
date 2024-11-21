@@ -8,17 +8,22 @@ from newsapi import NewsApiClient
 import random
 import os
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__, static_folder="static")
+app.secret_key = os.getenv('FLASK_SECRET_KEY')
 CORS(app)
 
 # Initialize News API
-newsapi = NewsApiClient(api_key='c4b74265e83f4568b7f77090527d4204')
+newsapi = NewsApiClient(api_key=os.getenv('NEWS_API_KEY'))
 
 # MongoDB configurations
-app.config["MONGO_URI"] = "mongodb+srv://amaanhussain:h5VkBlsEmCReD79E@cluster0.oifmm.mongodb.net/"
+app.config["MONGO_URI"] = os.getenv('MONGO_URI')
 mongo = PyMongo(app)
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient(os.getenv('MONGO_URI'))
 db = client['gamified_quizzes']
 
 # AI model configuration
