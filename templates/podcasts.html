@@ -3,29 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Podcasts - Anti-Doping Education Platform</title>
+    <title>Podcasts - Anti-Doping Education</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        .podcast-container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .podcast-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .podcast-image {
+            width: 120px;
+            height: 120px;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+        .podcast-info {
+            flex: 1;
+        }
+        .podcast-title {
+            font-size: 1.2em;
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .podcast-description {
+            color: #666;
+            margin-bottom: 10px;
+        }
+        .podcast-meta {
+            font-size: 0.9em;
+            color: #888;
+        }
+        .audio-player {
+            width: 100%;
+            margin-top: 10px;
+        }
+        .categories {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .category-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 20px;
+            background: #f0f0f0;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .category-btn:hover {
+            background: #e0e0e0;
+        }
+        .category-btn.active {
+            background: #007bff;
+            color: white;
+        }
+    </style>
 </head>
 <body>
     <header>
-        <h1>Podcasts</h1>
+        <h1>Anti-Doping Podcasts</h1>
     </header>
 
     <nav class="menu">
         <a href="/"><i class="fas fa-home"></i> Home</a>
         <a href="/antidopingwiki"><i class="fas fa-book-reader"></i> Anti-Doping Wiki</a>
+        <a href="/podcasts" class="active"><i class="fas fa-podcast"></i> Podcasts</a>
+        <a href="/digitaltwin"><i class="fas fa-user-circle"></i> Digital Twin</a>
         <a href="/caloriescalculator"><i class="fas fa-calculator"></i> Calories</a>
+        <a href="/smartlabels"><i class="fas fa-qrcode"></i> Smart Labels</a>
         <a href="/ai_coach"><i class="fas fa-robot"></i> AI Coach</a>
         <a href="/games"><i class="fas fa-gamepad"></i> Games</a>
     </nav>
 
-    <div class="main-content">
-        <!-- Content temporarily removed -->
+    <div class="podcast-container">
+        <div class="categories">
+            <button class="category-btn active">All</button>
+            <button class="category-btn">Anti-Doping Rules</button>
+            <button class="category-btn">Athlete Stories</button>
+            <button class="category-btn">Education</button>
+            <button class="category-btn">News & Updates</button>
+        </div>
+
+        <div class="podcast-card">
+            <img src="https://via.placeholder.com/120" alt="Podcast thumbnail" class="podcast-image">
+            <div class="podcast-info">
+                <h3 class="podcast-title">Understanding Anti-Doping Rules</h3>
+                <p class="podcast-description">A comprehensive guide to anti-doping regulations and their importance in sports.</p>
+                <div class="podcast-meta">
+                    <span><i class="fas fa-clock"></i> 45 minutes</span>
+                    <span><i class="fas fa-calendar"></i> Jan 15, 2024</span>
+                </div>
+                <audio controls class="audio-player">
+                    <source src="#" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <div class="podcast-card">
+            <img src="https://via.placeholder.com/120" alt="Podcast thumbnail" class="podcast-image">
+            <div class="podcast-info">
+                <h3 class="podcast-title">Athlete Stories: Clean Sport Champions</h3>
+                <p class="podcast-description">Listen to inspiring stories from athletes who compete clean and promote fair play.</p>
+                <div class="podcast-meta">
+                    <span><i class="fas fa-clock"></i> 30 minutes</span>
+                    <span><i class="fas fa-calendar"></i> Jan 10, 2024</span>
+                </div>
+                <audio controls class="audio-player">
+                    <source src="#" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <div class="podcast-card">
+            <img src="https://via.placeholder.com/120" alt="Podcast thumbnail" class="podcast-image">
+            <div class="podcast-info">
+                <h3 class="podcast-title">Latest Updates in Anti-Doping</h3>
+                <p class="podcast-description">Stay informed about the latest developments and changes in anti-doping policies.</p>
+                <div class="podcast-meta">
+                    <span><i class="fas fa-clock"></i> 35 minutes</span>
+                    <span><i class="fas fa-calendar"></i> Jan 5, 2024</span>
+                </div>
+                <audio controls class="audio-player">
+                    <source src="#" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
     </div>
 
     <footer>
         <p>&copy; 2024 Anti-Doping Education Platform. All rights reserved.</p>
     </footer>
+
+    <script>
+        // Add click handlers for category buttons
+        document.querySelectorAll('.category-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                // Remove active class from all buttons
+                document.querySelectorAll('.category-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                // Add active class to clicked button
+                button.classList.add('active');
+                // In a real application, this would filter the podcasts
+            });
+        });
+    </script>
 </body>
 </html>

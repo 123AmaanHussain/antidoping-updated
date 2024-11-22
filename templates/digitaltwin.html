@@ -6,23 +6,141 @@
     <title>Digital Twin - Anti-Doping Education Platform</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .profile-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .metrics-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .recommendations-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .info-item {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+        }
+        .info-item label {
+            font-weight: bold;
+            margin-right: 10px;
+            min-width: 120px;
+        }
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+        li {
+            margin: 10px 0;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+    </style>
 </head>
 <body>
     <header>
-        <h1>Digital Twin</h1>
+        <h1>Digital Twin Athlete Profile</h1>
     </header>
 
     <nav class="menu">
         <a href="/"><i class="fas fa-home"></i> Home</a>
         <a href="/antidopingwiki"><i class="fas fa-book-reader"></i> Anti-Doping Wiki</a>
+        <a href="/podcasts"><i class="fas fa-podcast"></i> Podcasts</a>
+        <a href="/digitaltwin" class="active"><i class="fas fa-user-circle"></i> Digital Twin</a>
         <a href="/caloriescalculator"><i class="fas fa-calculator"></i> Calories</a>
+        <a href="/smartlabels"><i class="fas fa-qrcode"></i> Smart Labels</a>
         <a href="/ai_coach"><i class="fas fa-robot"></i> AI Coach</a>
         <a href="/games"><i class="fas fa-gamepad"></i> Games</a>
     </nav>
 
-    <div class="main-content">
-        <!-- Content temporarily removed -->
+    <div class="container">
+        <div class="profile-section">
+            <h2>Athlete Information</h2>
+            <div class="profile-info">
+                <div class="info-item">
+                    <label>Name:</label>
+                    <span id="athlete-name">Loading...</span>
+                </div>
+                <div class="info-item">
+                    <label>Sport:</label>
+                    <span id="athlete-sport">Loading...</span>
+                </div>
+                <div class="info-item">
+                    <label>Training Status:</label>
+                    <span id="training-status">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="metrics-section">
+            <div class="metric-card">
+                <h3>Physical Metrics</h3>
+                <ul>
+                    <li>Heart Rate: <span id="heart-rate">Loading...</span></li>
+                    <li>Blood Pressure: <span id="blood-pressure">Loading...</span></li>
+                    <li>VO2 Max: <span id="vo2-max">Loading...</span></li>
+                </ul>
+            </div>
+            <div class="metric-card">
+                <h3>Training Load</h3>
+                <ul>
+                    <li>Weekly Hours: <span id="weekly-hours">Loading...</span></li>
+                    <li>Intensity Level: <span id="intensity-level">Loading...</span></li>
+                    <li>Recovery Status: <span id="recovery-status">Loading...</span></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="recommendations-section">
+            <h2>Personalized Recommendations</h2>
+            <div id="recommendations">
+                Loading recommendations...
+            </div>
+        </div>
     </div>
+
+    <script>
+        // Simulated data - In a real application, this would come from your backend
+        setTimeout(() => {
+            document.getElementById('athlete-name').textContent = 'John Doe';
+            document.getElementById('athlete-sport').textContent = 'Track and Field';
+            document.getElementById('training-status').textContent = 'Active';
+            document.getElementById('heart-rate').textContent = '65 bpm';
+            document.getElementById('blood-pressure').textContent = '120/80';
+            document.getElementById('vo2-max').textContent = '50 ml/kg/min';
+            document.getElementById('weekly-hours').textContent = '15 hours';
+            document.getElementById('intensity-level').textContent = 'Moderate';
+            document.getElementById('recovery-status').textContent = 'Good';
+            document.getElementById('recommendations').innerHTML = `
+                <ul>
+                    <li>Increase hydration during training sessions</li>
+                    <li>Add more recovery time between high-intensity workouts</li>
+                    <li>Focus on flexibility training this week</li>
+                </ul>
+            `;
+        }, 1000);
+    </script>
 
     <footer>
         <p>&copy; 2024 Anti-Doping Education Platform. All rights reserved.</p>

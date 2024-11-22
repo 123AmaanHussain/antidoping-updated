@@ -1,39 +1,171 @@
-from flask import Flask, render_template, request, jsonify, send_file
-from flask_pymongo import PyMongo
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from pymongo import MongoClient
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from fpdf import FPDF
 from newsapi import NewsApiClient
 import random
 import os
 from datetime import datetime, timedelta
+from blockchain_service import BlockchainService
+from web3 import Web3
+import json
 from dotenv import load_dotenv
+import logging
+import time
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__, static_folder="static")
-app.secret_key = os.getenv('FLASK_SECRET_KEY')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
 CORS(app)
+
+client = MongoClient(os.getenv('MONGO_URI', 'mongodb://localhost:27017/'))
+db = client['gamified_quizzes']
+
+# Initialize logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler('antidoping.log'),
+        logging.StreamHandler()
+    ]
+)
 
 # Initialize News API
 newsapi = NewsApiClient(api_key=os.getenv('NEWS_API_KEY'))
 
-# MongoDB configurations
-app.config["MONGO_URI"] = os.getenv('MONGO_URI')
-mongo = PyMongo(app)
-client = MongoClient(os.getenv('MONGO_URI'))
-db = client['gamified_quizzes']
+# Initialize blockchain service
+try:
+    blockchain_service = BlockchainService()
+    logging.info("Blockchain service initialized")
+except Exception as e:
+    logging.error(f"Failed to initialize blockchain service: {str(e)}")
+    raise
 
 # AI model configuration
 model_name = "microsoft/DialoGPT-medium"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
-# Certificate configuration
-CERTIFICATE_DIR = "certificates"
-os.makedirs(CERTIFICATE_DIR, exist_ok=True)
+# Create certificates directory if it doesn't exist
+os.makedirs('certificates', exist_ok=True)
+
+# Initialize MongoDB with quiz data
+def init_quiz_data():
+    try:
+        # Drop existing quiz data to ensure clean state
+        db.quizzes.drop()
+        
+        sample_quiz = {
+            "quiz_id": "quiz1",
+            "title": "Anti-Doping Basics",
+            "questions": [
+                {
+                    "text": "What is WADA?",
+                    "options": [
+                        "World Athletics Development Association",
+                        "World Anti-Doping Agency",
+                        "World Athletics Doping Authority",
+                        "World Agency for Doping Analysis"
+                    ],
+                    "correct_answer": 1
+                },
+                {
+                    "text": "Which of these is a prohibited substance?",
+                    "options": [
+                        "Vitamin C",
+                        "Caffeine",
+                        "Anabolic Steroids",
+                        "Protein Powder"
+                    ],
+                    "correct_answer": 2
+                },
+                {
+                    "text": "How often should athletes check the prohibited substances list?",
+                    "options": [
+                        "Once a year",
+                        "Every 6 months",
+                        "Only when prescribed new medication",
+                        "Regularly, as it's updated frequently"
+                    ],
+                    "correct_answer": 3
+                }
+            ]
+        }
+        
+        result = db.quizzes.insert_one(sample_quiz)
+        logging.info(f"Initialized quiz data with ID: {result.inserted_id}")
+        return True
+    except Exception as e:
+        logging.error(f"Error initializing quiz data: {str(e)}")
+        return False
+
+# Initialize quiz data
+if not init_quiz_data():
+    logging.error("Failed to initialize quiz data")
+
+# Quiz data - you can expand this with more questions
+QUIZ_DATA = {
+    'quiz': {
+        'quiz_id': 'antidoping_basics',
+        'title': 'Anti-Doping Basics Quiz',
+        'questions': [
+            {
+                'text': 'What is the main purpose of anti-doping regulations?',
+                'options': [
+                    'To ensure fair competition and protect athlete health',
+                    'To make sports more entertaining',
+                    'To increase athletic performance',
+                    'To reduce sports participation'
+                ],
+                'correct': 0
+            },
+            {
+                'text': 'Which organization is responsible for the World Anti-Doping Code?',
+                'options': [
+                    'FIFA',
+                    'IOC',
+                    'WADA',
+                    'UEFA'
+                ],
+                'correct': 2
+            },
+            {
+                'text': 'What is a "prohibited substance"?',
+                'options': [
+                    'Any substance that enhances performance',
+                    'Substances listed on the WADA Prohibited List',
+                    'Illegal drugs only',
+                    'Substances chosen by sports federations'
+                ],
+                'correct': 1
+            },
+            {
+                'text': 'How often is the WADA Prohibited List updated?',
+                'options': [
+                    'Monthly',
+                    'Every six months',
+                    'Annually',
+                    'Every two years'
+                ],
+                'correct': 2
+            },
+            {
+                'text': 'What is a TUE in anti-doping?',
+                'options': [
+                    'Technical Use Exemption',
+                    'Therapeutic Use Exemption',
+                    'Temporary Use Exception',
+                    'Training Under Examination'
+                ],
+                'correct': 1
+            }
+        ]
+    }
+}
 
 # Response templates for AI coach
 RESPONSE_TEMPLATES = {
@@ -78,6 +210,18 @@ news_cache = {
 @app.route("/")
 def home():
     return render_template("home.html")
+
+@app.route("/podcasts")
+def podcasts():
+    return render_template("podcasts.html")
+
+@app.route("/digitaltwin")
+def digitaltwin():
+    return render_template("digitaltwin.html")
+
+@app.route("/smartlabels")
+def smartlabels():
+    return render_template("smartlabels.html")
 
 @app.route('/antidopingwiki')
 def antidopingwiki():
@@ -145,9 +289,9 @@ def antidopingwiki():
             news_cache['data'] = all_news
             
     except Exception as e:
-        print(f"Error fetching news: {str(e)}")
+        logging.error(f"Error fetching news: {str(e)}")
         import traceback
-        print(f"Full error traceback: {traceback.format_exc()}")
+        logging.error(f"Full error traceback: {traceback.format_exc()}")
         
         # Use cached data if available, otherwise use sample news
         if news_cache['data']:
@@ -188,6 +332,210 @@ def ai_coach():
 def games():
     return render_template("games.html")
 
+@app.route('/get_quiz/<quiz_id>')
+def get_quiz(quiz_id):
+    try:
+        logging.info(f"Fetching quiz with ID: {quiz_id}")  # Debug log
+        quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
+        logging.info(f"Found quiz: {quiz}")  # Debug log
+        
+        if not quiz:
+            # Try to initialize quiz data
+            if init_quiz_data():
+                quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
+        
+        if quiz:
+            return jsonify(quiz)
+        return jsonify({"error": "Quiz not found"}), 404
+    except Exception as e:
+        logging.error(f"Error getting quiz: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def generate_pdf_certificate(user_id, quiz_id, score, timestamp):
+    """Generate a PDF certificate for quiz completion"""
+    try:
+        # Create certificates directory if it doesn't exist
+        certificate_dir = os.path.join(os.path.dirname(__file__), 'certificates')
+        os.makedirs(certificate_dir, exist_ok=True)
+        
+        # Initialize PDF
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # Add certificate styling
+        pdf.set_font("Arial", "B", 24)
+        pdf.set_text_color(44, 62, 80)  # Dark blue color
+        pdf.cell(0, 30, "Certificate of Achievement", ln=True, align='C')
+        
+        # Add logo if exists
+        logo_path = os.path.join(os.path.dirname(__file__), 'static', 'images', 'logo.png')
+        if os.path.exists(logo_path):
+            pdf.image(logo_path, x=85, y=50, w=40)
+        
+        # Certificate content
+        pdf.set_font("Arial", "", 16)
+        pdf.ln(60)  # Add some space after logo
+        pdf.cell(0, 10, "This is to certify that", ln=True, align='C')
+        
+        pdf.set_font("Arial", "B", 18)
+        pdf.cell(0, 15, f"User ID: {user_id}", ln=True, align='C')
+        
+        pdf.set_font("Arial", "", 16)
+        pdf.cell(0, 10, "has successfully completed the", ln=True, align='C')
+        pdf.cell(0, 10, "Anti-Doping Awareness Quiz", ln=True, align='C')
+        pdf.cell(0, 10, f"with a score of {score}%", ln=True, align='C')
+        
+        # Add date
+        pdf.set_font("Arial", "I", 14)
+        pdf.cell(0, 20, f"Date: {timestamp.strftime('%B %d, %Y')}", ln=True, align='C')
+        
+        # Add verification text
+        pdf.set_font("Arial", "", 10)
+        pdf.set_text_color(128, 128, 128)  # Gray color
+        pdf.cell(0, 10, "This certificate's authenticity can be verified on the blockchain", ln=True, align='C')
+        
+        # Generate unique filename
+        filename = f"{user_id}_{quiz_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.pdf"
+        filepath = os.path.join(certificate_dir, filename)
+        
+        # Save PDF
+        pdf.output(filepath)
+        return filepath
+        
+    except Exception as e:
+        app.logger.error(f"Error generating PDF certificate: {str(e)}")
+        raise
+
+@app.route('/submit_quiz', methods=['POST'])
+def submit_quiz():
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['user_id', 'quiz_id', 'answers', 'wallet_address']
+        for field in required_fields:
+            if field not in data:
+                raise ValueError(f"Missing required field: {field}")
+
+        user_id = data['user_id']
+        quiz_id = data['quiz_id']
+        answers = data['answers']
+        wallet_address = data['wallet_address']
+
+        # Get quiz data
+        quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
+        if not quiz:
+            raise ValueError("Invalid quiz ID")
+
+        # Calculate score
+        correct_answers = [q['correct_answer'] for q in quiz['questions']]
+        if len(answers) != len(correct_answers):
+            raise ValueError("Number of answers does not match number of questions")
+
+        score = calculate_score(answers, correct_answers)
+        timestamp = datetime.utcnow()
+
+        # Store quiz result
+        quiz_result = {
+            'user_id': user_id,
+            'quiz_id': quiz_id,
+            'score': score,
+            'answers': answers,
+            'wallet_address': wallet_address,
+            'timestamp': timestamp
+        }
+        
+        # Generate certificate data if passing score
+        certificate_data = None
+        if score >= 70:
+            try:
+                # Generate PDF certificate
+                pdf_path = generate_pdf_certificate(user_id, quiz_id, score, timestamp)
+                
+                # Store certificate path
+                quiz_result['pdf_certificate'] = os.path.basename(pdf_path)
+                
+                # Generate certificate metadata
+                metadata = {
+                    'user_id': user_id,
+                    'quiz_id': quiz_id,
+                    'score': score,
+                    'timestamp': timestamp.isoformat()
+                }
+                
+                # Attempt to mint blockchain certificate
+                token_id = None
+                try:
+                    token_id = blockchain_service.mint_certificate(
+                        recipient_address=wallet_address,
+                        quiz_title=quiz['title'],
+                        score=int(score)
+                    )
+                except Exception as e:
+                    app.logger.error(f"Error minting blockchain certificate: {str(e)}")
+                
+                certificate_data = {
+                    'token_id': token_id,
+                    'metadata': metadata,
+                    'pdf_path': os.path.basename(pdf_path)
+                }
+                
+                quiz_result['certificate'] = certificate_data
+                
+            except Exception as e:
+                app.logger.error(f"Error generating certificate: {str(e)}")
+                certificate_data = {'error': str(e)}
+        
+        # Store result in database
+        db.quiz_results.insert_one(quiz_result)
+
+        return jsonify({
+            'success': True,
+            'score': score,
+            'certificate': certificate_data
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error submitting quiz: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/download_certificate/<user_id>/<filename>')
+def download_certificate(user_id, filename):
+    try:
+        # Security check: ensure filename belongs to the user
+        if not filename.startswith(f"{user_id}_"):
+            raise ValueError("Invalid certificate access")
+            
+        certificate_dir = os.path.join(os.path.dirname(__file__), 'certificates')
+        return send_from_directory(
+            certificate_dir, 
+            filename,
+            as_attachment=True,
+            download_name=f"antidoping_certificate_{user_id}.pdf"
+        )
+    except Exception as e:
+        app.logger.error(f"Error downloading certificate: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route("/get_progress/<user_id>")
+def get_progress(user_id):
+    try:
+        scores = list(db.scores.find({"user_id": user_id}, {"_id": 0}))
+        return jsonify(scores), 200
+    except Exception as e:
+        logging.error(f"Error getting progress: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route("/anti_doping")
+def anti_doping_page():
+    return render_template('anti_doping.html')
+
 # AI Coach response generation
 def generate_response(user_input):
     if "doping" in user_input or "substance" in user_input:
@@ -208,94 +556,13 @@ def get_response():
     response = generate_response(user_text)
     return jsonify(response)
 
-# Quiz related routes
-@app.route('/get_quiz/<quiz_id>', methods=['GET'])
-def get_quiz(quiz_id):
-    quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
-    if quiz:
-        return jsonify(quiz), 200
-    return jsonify({"error": "Quiz not found"}), 404
-
-@app.route("/submit_quiz", methods=["POST"])
-def submit_quiz():
-    data = request.json
-    quiz_id = data.get("quiz_id")
-    user_id = data.get("user_id")
-    answers = data.get("answers")
-
-    if not quiz_id or not user_id or not answers:
-        return jsonify({"error": "Missing required fields"}), 400
-
-    quiz = db.quizzes.find_one({"quiz_id": quiz_id})
-    if not quiz:
-        return jsonify({"error": "Quiz not found"}), 404
-
-    score = 0
-    correct_options = [q['correct_option'] for q in quiz["questions"]]
-    for idx, correct_option in enumerate(correct_options):
-        if idx < len(answers) and answers[idx] == correct_option:
-            score += quiz["points_per_question"]
-
-    pass_threshold = len(quiz["questions"]) * quiz["points_per_question"] * 0.8
-    if score >= pass_threshold:
-        quiz_title = quiz["title"]
-        date = "2024-11-21"
-
-        certificate_path = generate_certificate_pdf(
-            user_id, quiz_title, score, date, f"{CERTIFICATE_DIR}/{user_id}_{quiz_id}_certificate.pdf"
-        )
-
-        db.scores.insert_one({
-            "user_id": user_id,
-            "quiz_id": quiz_id,
-            "score": score,
-            "status": "Passed"
-        })
-
-        return jsonify({
-            "message": "Quiz submitted successfully!",
-            "score": score,
-            "certificate": f"/download_certificate/{user_id}/{quiz_id}"
-        }), 200
-
-    db.scores.insert_one({
-        "user_id": user_id,
-        "quiz_id": quiz_id,
-        "score": score,
-        "status": "Failed"
-    })
+def calculate_score(user_answers, correct_answers):
+    """Calculate the percentage score for a quiz"""
+    if len(user_answers) != len(correct_answers):
+        raise ValueError("Answer length mismatch")
     
-    return jsonify({
-        "message": "Quiz submitted, but score below passing threshold",
-        "score": score
-    }), 200
-
-def generate_certificate_pdf(user_id, quiz_title, score, date, filename):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=16)
-    pdf.cell(200, 10, txt="Certificate of Completion", ln=1, align='C')
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt=f"This certifies that {user_id}", ln=1, align='C')
-    pdf.cell(200, 10, txt=f"has completed the quiz: {quiz_title}", ln=1, align='C')
-    pdf.cell(200, 10, txt=f"with a score of {score}", ln=1, align='C')
-    pdf.cell(200, 10, txt=f"Date: {date}", ln=1, align='C')
-    pdf.output(filename)
-    return filename
-
-@app.route("/download_certificate/<user_id>/<quiz_id>")
-def download_certificate(user_id, quiz_id):
-    filename = f"{CERTIFICATE_DIR}/{user_id}_{quiz_id}_certificate.pdf"
-    return send_file(filename, as_attachment=True)
-
-@app.route("/get_progress/<user_id>")
-def get_progress(user_id):
-    progress = list(db.scores.find({"user_id": user_id}, {"_id": 0}))
-    return jsonify(progress)
-
-@app.route("/anti_doping")
-def anti_doping_page():
-    return render_template('anti_doping.html')
+    correct_count = sum(1 for user_ans, correct_ans in zip(user_answers, correct_answers) if user_ans == correct_ans)
+    return (correct_count / len(correct_answers)) * 100
 
 if __name__ == "__main__":
     app.run(debug=True)
