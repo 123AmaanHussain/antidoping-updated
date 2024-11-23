@@ -1,7 +1,6 @@
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from pymongo import MongoClient
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from fpdf import FPDF
 from newsapi import NewsApiClient
 import random
@@ -13,9 +12,16 @@ import json
 from dotenv import load_dotenv
 import logging
 import time
+import requests
+import google.generativeai as genai
+from bson import ObjectId
 
 # Load environment variables
 load_dotenv()
+
+# Directly set the API key
+GOOGLE_API_KEY = "AIzaSyAKVHyZrJB36-fa1t_nXO_-BcCyUJlO88g"
+print(f"API Key loaded: {'[MASKED]' if GOOGLE_API_KEY else 'None'}")
 
 app = Flask(__name__, static_folder="static")
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
@@ -23,6 +29,7 @@ CORS(app)
 
 client = MongoClient(os.getenv('MONGO_URI', 'mongodb://localhost:27017/'))
 db = client['gamified_quizzes']
+nutrition_plans = db.nutrition_plans
 
 # Initialize logging
 logging.basicConfig(
@@ -42,13 +49,12 @@ try:
     blockchain_service = BlockchainService()
     logging.info("Blockchain service initialized")
 except Exception as e:
-    logging.error(f"Failed to initialize blockchain service: {str(e)}")
-    raise
+    logging.warning(f"Failed to initialize blockchain service: {str(e)}")
+    blockchain_service = None
 
-# AI model configuration
-model_name = "microsoft/DialoGPT-medium"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
+# Configure Gemini
+genai.configure(api_key=GOOGLE_API_KEY)
+model = genai.GenerativeModel('gemini-pro')
 
 # Create certificates directory if it doesn't exist
 os.makedirs('certificates', exist_ok=True)
@@ -165,39 +171,6 @@ QUIZ_DATA = {
             }
         ]
     }
-}
-
-# Response templates for AI coach
-RESPONSE_TEMPLATES = {
-    "anti_doping": [
-        "As your anti-doping advisor, it's important to avoid substances on the WADA (World Anti-Doping Agency) prohibited list. Always consult the latest resources and check your supplements carefully. If you're unsure about an ingredient, consider talking to an expert.",
-        "Avoid supplements with unfamiliar ingredients, as they might contain banned substances. Staying informed and regularly checking the WADA website can help you stay compliant and protect your career.",
-        "An athlete's career can be affected by accidental doping violations. Stick to trusted supplements, and avoid any that aren't thoroughly researched or that have unknown ingredients.",
-        "Always stay informed about banned substances. Consult with a medical professional or a doping advisor to ensure all supplements you use are safe and legal."
-    ],
-    "fitness": [
-        "For effective fitness training, balance cardio with strength exercises. Include endurance training, but also dedicate time to strength work to build core stability and power.",
-        "To build endurance, try interval training or long-distance running. Combine this with weight training to enhance your overall athletic ability.",
-        "Aim to work out at least three times a week, and don't forget to stretch before and after your sessions. Stretching helps with flexibility and can prevent injuries.",
-        "Remember to allow for rest days between intense workouts. Rest days are crucial for muscle recovery and long-term progress. Pacing yourself will prevent burnout and help you stay consistent."
-    ],
-    "health": [
-        "A balanced diet is crucial for peak performance. Focus on high-quality proteins, complex carbohydrates, and healthy fats to fuel your body effectively.",
-        "Stay hydrated, especially during intense training periods. Dehydration can impair performance, so keep a water bottle handy throughout the day.",
-        "Good mental health is essential. Consider incorporating practices like mindfulness, meditation, or journaling to manage stress and improve focus.",
-        "Sleep is one of the most important factors in recovery. Aim for 7-9 hours of quality sleep each night to allow your body to repair and prepare for the next training session."
-    ],
-    "motivation": [
-        "Staying motivated as an athlete can be challenging. Set small, achievable goals and celebrate each accomplishment to keep yourself encouraged.",
-        "Focus on the reasons why you started. Visualize your long-term goals and remind yourself of the progress you've made to stay motivated.",
-        "Surround yourself with supportive people, whether teammates, friends, or family. A positive environment can boost your motivation and make training enjoyable.",
-        "Consistency is key to success. Even on days when motivation is low, sticking to your routine will help you stay on track and achieve your goals over time."
-    ],
-    "general": [
-        "I'm here to assist you with fitness, health, anti-doping, and motivation. You can ask specific questions in any of these areas!",
-        "Ask me about fitness training, dietary advice, motivation tips, or guidance on anti-doping best practices for athletes.",
-        "I can help with tips on fitness, health, anti-doping, and motivation. Let me know which area you're interested in!"
-    ]
 }
 
 # News cache
@@ -324,8 +297,8 @@ def antidopingwiki():
 def caloriescalculator():
     return render_template("caloriescalculator.html")
 
-@app.route("/ai_coach")
-def ai_coach():
+@app.route("/ai-coach-page")
+def ai_coach_page():
     return render_template("ai_coach.html")
 
 @app.route("/games")
@@ -536,25 +509,197 @@ def get_progress(user_id):
 def anti_doping_page():
     return render_template('anti_doping.html')
 
-# AI Coach response generation
-def generate_response(user_input):
-    if "doping" in user_input or "substance" in user_input:
-        response = random.choice(RESPONSE_TEMPLATES["anti_doping"])
-    elif "fitness" in user_input or "training" in user_input:
-        response = random.choice(RESPONSE_TEMPLATES["fitness"])
-    elif "health" in user_input or "nutrition" in user_input or "diet" in user_input:
-        response = random.choice(RESPONSE_TEMPLATES["health"])
-    elif "motivate" in user_input or "goal" in user_input or "discouraged" in user_input:
-        response = random.choice(RESPONSE_TEMPLATES["motivation"])
-    else:
-        response = random.choice(RESPONSE_TEMPLATES["general"])
-    return response
+@app.route('/ai-nutrition-planner')
+def ai_nutrition_planner():
+    return render_template('ai_nutrition_planner.html')
 
-@app.route("/get_response", methods=["POST"])
-def get_response():
-    user_text = request.form["msg"]
-    response = generate_response(user_text)
-    return jsonify(response)
+@app.route('/generate-nutrition-plan', methods=['POST'])
+def generate_nutrition_plan():
+    try:
+        data = request.json
+        # Construct the prompt for the model
+        prompt = f"""As a professional sports nutritionist, create a detailed weekly nutrition plan for an athlete with the following details:
+        Sport: {data['sport']}
+        Age: {data['age']}
+        Weight: {data['weight']} kg
+        Height: {data['height']} cm
+        Gender: {data['gender']}
+        Training Phase: {data['trainingPhase']}
+        Dietary Restrictions: {data['dietaryRestrictions']}
+        Goals: {data['goals']}
+        
+        Please provide a comprehensive nutrition plan including:
+        1. Daily caloric needs
+        2. Macronutrient distribution
+        3. Meal timing around training
+        4. Specific food recommendations
+        5. Pre and post-workout nutrition
+        6. Hydration guidelines
+        7. Supplement recommendations (if necessary)
+        
+        Format the response in a clear, structured way with sections and bullet points."""
+
+        # Generate response using Gemini
+        response = model.generate_content(prompt)
+        
+        # Get the generated text
+        nutrition_plan = response.text
+        return jsonify({"plan": nutrition_plan})
+    except Exception as e:
+        print(f"Error in generate_nutrition_plan: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/save-nutrition-plan', methods=['POST'])
+def save_nutrition_plan():
+    try:
+        data = request.json
+        # Add timestamp and generate unique ID
+        data['created_at'] = datetime.utcnow()
+        data['_id'] = str(ObjectId())
+        
+        # Save to MongoDB
+        nutrition_plans.insert_one(data)
+        return jsonify({'success': True, 'message': 'Nutrition plan saved successfully', 'plan_id': data['_id']})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/get-saved-plans', methods=['GET'])
+def get_saved_plans():
+    try:
+        # Retrieve all saved plans, sorted by creation date
+        saved_plans = list(nutrition_plans.find().sort('created_at', -1))
+        # Convert ObjectId to string for JSON serialization
+        for plan in saved_plans:
+            plan['_id'] = str(plan['_id'])
+            plan['created_at'] = plan['created_at'].isoformat()
+        return jsonify({'success': True, 'plans': saved_plans})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/delete-nutrition-plan/<plan_id>', methods=['DELETE'])
+def delete_nutrition_plan(plan_id):
+    try:
+        # Delete the plan from MongoDB
+        result = nutrition_plans.delete_one({'_id': plan_id})
+        if result.deleted_count > 0:
+            return jsonify({'success': True, 'message': 'Plan deleted successfully'})
+        else:
+            return jsonify({'success': False, 'message': 'Plan not found'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# AI Coach configuration
+AI_COACH_PROMPT = """You are an expert AI Sports Coach and Anti-Doping Assistant. Your role is to provide personalized guidance for athletes.
+
+Current language: {language}
+Previous conversation:
+{context}
+
+User's message: {message}
+
+Please provide a response that:
+1. Is clear, concise, and actionable
+2. Uses appropriate language and tone for {language}
+3. Includes specific training or anti-doping advice when relevant
+4. Maintains a supportive and motivating tone
+5. References scientific/medical facts when appropriate
+6. Emphasizes safety and compliance with anti-doping regulations
+
+Response:"""
+
+@app.route('/chat')
+def chat():
+    """Render the chat interface"""
+    return render_template('chat.html')
+
+@app.route('/ai-coach', methods=['POST'])
+def ai_coach_api():
+    """Handle AI coach API requests with improved context and error handling"""
+    try:
+        # Validate request data
+        if not request.is_json:
+            return jsonify({
+                'error': 'Request must be JSON',
+                'success': False
+            }), 400
+
+        data = request.json
+        user_message = data.get('message', '').strip()
+        language = data.get('language', 'en')
+        context = data.get('context', [])
+
+        # Validate input
+        if not user_message:
+            return jsonify({
+                'error': 'Message cannot be empty',
+                'success': False
+            }), 400
+
+        # Process conversation context
+        context_summary = ""
+        if context:
+            # Take last 3 interactions for context
+            recent_context = context[-6:]  # Last 3 exchanges (user + coach)
+            context_summary = "\n".join([
+                f"{'User' if item['role'] == 'user' else 'Coach'}: {item['content']}"
+                for item in recent_context
+            ])
+
+        # Map language codes to full names for better context
+        language_names = {
+            'en': 'English',
+            'es': 'Spanish',
+            'fr': 'French',
+            'de': 'German',
+            'it': 'Italian',
+            'pt': 'Portuguese',
+            'hi': 'Hindi',
+            'zh': 'Chinese'
+        }
+
+        # Format the prompt
+        formatted_prompt = AI_COACH_PROMPT.format(
+            language=language_names.get(language, 'English'),
+            context=context_summary,
+            message=user_message
+        )
+
+        try:
+            # Generate response using Gemini
+            response = model.generate_content(formatted_prompt)
+            coach_response = response.text
+
+            # Translate if needed
+            if language != 'en':
+                translation_prompt = f"""Translate this sports coaching response to {language_names.get(language, 'English')}.
+                Maintain the professional and supportive tone.
+                Preserve technical terms, numbers, and proper names.
+                
+                Original text: {coach_response}
+                
+                Translation:"""
+                
+                translation = model.generate_content(translation_prompt)
+                coach_response = translation.text
+
+            return jsonify({
+                'response': coach_response,
+                'success': True
+            })
+
+        except Exception as e:
+            logging.error(f"Gemini API error: {str(e)}")
+            return jsonify({
+                'error': 'An error occurred while generating the response. Please try again.',
+                'success': False
+            }), 500
+
+    except Exception as e:
+        logging.error(f"AI coach error: {str(e)}")
+        return jsonify({
+            'error': 'An unexpected error occurred. Please try again.',
+            'success': False
+        }), 500
 
 def calculate_score(user_answers, correct_answers):
     """Calculate the percentage score for a quiz"""

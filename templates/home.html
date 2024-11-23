@@ -6,11 +6,76 @@
     <title>Anti-Doping Awareness</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Gemini Chatbot Button Styles */
+        .gemini-chat-button {
+            position: fixed !important;
+            bottom: 20px !important;
+            right: 20px !important;
+            padding: 15px 25px !important;
+            background: linear-gradient(135deg, #4285f4, #0d6efd) !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 25px !important;
+            font-size: 16px !important;
+            font-weight: 600 !important;
+            cursor: pointer !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2) !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 10px !important;
+            z-index: 99999 !important;
+            transition: all 0.3s ease !important;
+        }
+
+        .gemini-chat-button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25) !important;
+            background: linear-gradient(135deg, #0d6efd, #4285f4) !important;
+        }
+
+        .gemini-chat-button i {
+            font-size: 20px !important;
+        }
+
+        .gemini-chat-button .status-dot {
+            width: 8px !important;
+            height: 8px !important;
+            background-color: #00ff00 !important;
+            border-radius: 50% !important;
+            margin-left: 5px !important;
+            animation: pulse 2s infinite !important;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Mobile Responsive Styles */
+        @media (max-width: 768px) {
+            .gemini-chat-button {
+                padding: 12px 20px !important;
+                font-size: 14px !important;
+                bottom: 15px !important;
+                right: 15px !important;
+            }
+        }
+    </style>
 </head>
 <body>
+    <button class="gemini-chat-button" onclick="window.location.href='/chat'" title="Chat with Personal AI Coach">
+        <i class="fas fa-robot"></i>
+        Personal Coach
+        <span class="status-dot"></span>
+    </button>
     <header>
-        <h1><i class="fas fa-shield-alt"></i> Anti-Doping Education Platform</h1>
-        <p>Empowering athletes with knowledge for clean sports</p>
+        <div class="header-content">
+            <h1><i class="fas fa-shield-alt"></i> Anti-Doping Education Platform</h1>
+            <p>Empowering athletes with knowledge for clean sports</p>
+        </div>
     </header>
 
     <nav class="menu">
@@ -18,9 +83,9 @@
         <a href="/antidopingwiki"><i class="fas fa-book-reader"></i> Anti-Doping Wiki</a>
         <a href="/podcasts"><i class="fas fa-podcast"></i> Podcasts</a>
         <a href="/digitaltwin"><i class="fas fa-user-circle"></i> Digital Twin</a>
-        <a href="/caloriescalculator"><i class="fas fa-calculator"></i> Calories</a>
+        <a href="/ai-nutrition-planner"><i class="fas fa-utensils"></i> Nutrition Planner</a>
         <a href="/smartlabels"><i class="fas fa-qrcode"></i> Smart Labels</a>
-        <a href="/ai_coach"><i class="fas fa-robot"></i> AI Coach</a>
+        <a href="/chat"><i class="fas fa-robot"></i> AI Coach</a>
         <a href="/games"><i class="fas fa-gamepad"></i> Games</a>
     </nav>
 
@@ -30,57 +95,77 @@
             <p>Explore our comprehensive resources and tools designed to support your athletic journey while maintaining the integrity of sports.</p>
             <button id="welcome-button"><i class="fas fa-play"></i> Get Started</button>
         </div>
+
+        <div class="features">
+            <div class="feature">
+                <i class="fas fa-robot fa-3x"></i>
+                <h2>AI Coach</h2>
+                <p>Get personalized guidance on anti-doping, fitness, and health from our intelligent AI coach.</p>
+                <a href="/chat" class="feature-link">Chat with AI Coach</a>
+            </div>
+            
+            <div class="feature">
+                <i class="fas fa-gamepad fa-3x"></i>
+                <h2>Educational Games</h2>
+                <p>Learn about anti-doping through interactive games and earn blockchain-verified certificates.</p>
+                <a href="/games" class="feature-link">Play & Learn</a>
+            </div>
+            
+            <div class="feature">
+                <i class="fas fa-book-reader fa-3x"></i>
+                <h2>Anti-Doping Wiki</h2>
+                <p>Access comprehensive information about anti-doping regulations, substances, and best practices.</p>
+                <a href="/antidopingwiki" class="feature-link">Learn More</a>
+            </div>
+
+            <div class="feature">
+                <i class="fas fa-podcast fa-3x"></i>
+                <h2>Podcasts</h2>
+                <p>Listen to expert discussions and athlete experiences in our curated podcast series.</p>
+                <a href="/podcasts" class="feature-link">Start Listening</a>
+            </div>
+
+            <div class="feature">
+                <i class="fas fa-user-circle fa-3x"></i>
+                <h2>Digital Twin</h2>
+                <p>Create your digital avatar and track your progress in maintaining a clean sports record.</p>
+                <a href="/digitaltwin" class="feature-link">Create Avatar</a>
+            </div>
+
+            <div class="feature">
+                <i class="fas fa-qrcode fa-3x"></i>
+                <h2>Smart Labels</h2>
+                <p>Scan and verify supplements using our blockchain-powered smart label system.</p>
+                <a href="/smartlabels" class="feature-link">Scan Now</a>
+            </div>
+        </div>
     </div>
 
-    <div class="features">
-        <div class="feature ai-coach">
-            <i class="fas fa-robot fa-3x"></i>
-            <h2>AI Coach</h2>
-            <p>Get personalized guidance on anti-doping, fitness, and health from our intelligent AI coach.</p>
-            <a href="/ai_coach" class="feature-link">Start Training</a>
-        </div>
-        
-        <div class="feature">
-            <i class="fas fa-gamepad fa-3x"></i>
-            <h2>Educational Games</h2>
-            <p>Learn about anti-doping through interactive games and earn certificates through our quiz system.</p>
-            <a href="/games" class="feature-link">Play & Learn</a>
-        </div>
-        
-        <div class="feature">
-            <i class="fas fa-book-reader fa-3x"></i>
-            <h2>Digital Resources</h2>
-            <p>Access our comprehensive collection of anti-doping resources, podcasts, and educational materials.</p>
-            <a href="/antidopingwiki" class="feature-link">Explore Resources</a>
-        </div>
+    <script>
+        document.getElementById('welcome-button').addEventListener('click', function() {
+            document.querySelector('.features').scrollIntoView({ behavior: 'smooth' });
+        });
 
-        <div class="feature">
-            <i class="fas fa-user-circle fa-3x"></i>
-            <h2>Digital Twin</h2>
-            <p>Track your performance metrics and get personalized recommendations for improvement.</p>
-            <a href="/digitaltwin" class="feature-link">View Profile</a>
-        </div>
+        // Add fade-in animation to features as they come into view
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = 1;
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, {
+            threshold: 0.1
+        });
 
-        <div class="feature">
-            <i class="fas fa-calculator fa-3x"></i>
-            <h2>Calories Calculator</h2>
-            <p>Calculate your daily caloric needs based on your activity level and goals.</p>
-            <a href="/caloriescalculator" class="feature-link">Calculate Now</a>
-        </div>
-
-        <div class="feature">
-            <i class="fas fa-qrcode fa-3x"></i>
-            <h2>Smart Labels</h2>
-            <p>Scan supplement labels to check for banned substances and get detailed information.</p>
-            <a href="/smartlabels" class="feature-link">Scan Labels</a>
-        </div>
-    </div>
+        document.querySelectorAll('.feature').forEach(feature => {
+            feature.style.opacity = 0;
+            feature.style.transform = 'translateY(20px)';
+            observer.observe(feature);
+        });
+    </script>
 
     <footer>
-        <p>&copy; 2024 Anti-Doping Education Platform. All rights reserved.</p>
     </footer>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/js/all.min.js"></script>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
