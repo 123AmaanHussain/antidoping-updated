@@ -1,39 +1,50 @@
+# Flask and Extensions
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
+
+# Database
 from pymongo import MongoClient
-from fpdf import FPDF
-from newsapi import NewsApiClient
-import random
-import os
-from datetime import datetime, timedelta
-from blockchain_service import BlockchainService
-from web3 import Web3
-import json
-from dotenv import load_dotenv
-import logging
-import time
-import requests
-import google.generativeai as genai
 from bson import ObjectId
+
+# File Handling
 from werkzeug.utils import secure_filename
 import mutagen
 from mutagen.mp3 import MP3
-import feedparser
-import requests
-from bs4 import BeautifulSoup
-import xml.etree.ElementTree as ET
+from fpdf import FPDF
+
+# External APIs
+from newsapi import NewsApiClient
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from googleapiclient.discovery import build
-from datetime import datetime, timedelta
+import google.generativeai as genai
+
+# Web3 and Blockchain
+from blockchain_service import BlockchainService
+from web3 import Web3
+
+# Data Processing
+from bs4 import BeautifulSoup
+import feedparser
+import xml.etree.ElementTree as ET
 import html
 from collections import deque
+
+# Standard Library
+import os
+import json
+import time
+import random
+import logging
+import requests
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Directly set the API key
-GOOGLE_API_KEY = "AIzaSyAKVHyZrJB36-fa1t_nXO_-BcCyUJlO88g"
+# Get API key from environment variable
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 print(f"API Key loaded: {'[MASKED]' if GOOGLE_API_KEY else 'None'}")
 
 app = Flask(__name__, static_folder="static")
