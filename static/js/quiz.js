@@ -1,162 +1,76 @@
-// Global variables
-let currentQuiz = null;
+let currentQuestionIndex = 0;
+let questions = [];
 let userAnswers = [];
-let userId = null;
-let walletState = {
-    connected: false,
-    currentAccount: null,
-    chainId: null
-};
+let userId = '';
 
-// Initialize Web3
-async function initWeb3() {
-    if (typeof window.ethereum !== 'undefined') {
-        window.web3 = new Web3(window.ethereum);
-        return true;
+async function startQuiz() {
+    userId = document.getElementById('user-id').value.trim();
+    if (!userId) {
+        showError('Please enter a User ID');
+        return;
     }
-    showError('MetaMask is not installed. Please install MetaMask to continue.');
-    return false;
-}
 
-// Connect wallet
-window.connectWallet = async function() {
     try {
-        if (!await initWeb3()) {
-            return false;
+        const response = await fetch('/get_questions');
+        if (!response.ok) {
+            throw new Error('Failed to fetch questions');
         }
-
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        if (accounts.length === 0) {
-            throw new Error('No accounts found.');
-        }
-
-        walletState.currentAccount = accounts[0];
-        walletState.connected = true;
-
-        // Get network ID
-        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-        walletState.chainId = chainId;
-
-        updateWalletUI();
-        showSuccess('Wallet connected successfully!');
-        return true;
-    } catch (error) {
-        console.error('Error connecting wallet:', error);
-        showError('Failed to connect wallet: ' + error.message);
-        return false;
-    }
-}
-
-// Update wallet UI
-function updateWalletUI() {
-    const statusElement = document.getElementById('wallet-status');
-    const addressElement = document.getElementById('wallet-address');
-    const connectButton = document.getElementById('connect-wallet');
-
-    if (walletState.connected && walletState.currentAccount) {
-        statusElement.textContent = 'Connected';
-        statusElement.className = 'text-success';
-        addressElement.textContent = `${walletState.currentAccount.substring(0, 6)}...${walletState.currentAccount.substring(38)}`;
-        connectButton.textContent = 'Connected';
-        connectButton.disabled = true;
-    } else {
-        statusElement.textContent = 'Not Connected';
-        statusElement.className = 'text-danger';
-        addressElement.textContent = '';
-        connectButton.textContent = 'Connect Wallet';
-        connectButton.disabled = false;
-    }
-}
-
-// Start quiz
-window.startQuiz = async function() {
-    try {
-        const userIdInput = document.getElementById('user-id');
-        if (!userIdInput || !userIdInput.value) {
-            showError('Please enter your User ID');
-            return;
-        }
-
-        if (!walletState.connected) {
-            showError('Please connect your wallet first');
-            return;
-        }
-
-        userId = userIdInput.value;
-        const response = await fetch('/get_quiz/quiz1');
-        const data = await response.json();
+        questions = await response.json();
         
-        if (data.error) {
-            throw new Error(data.error || 'Failed to load quiz');
-        }
-        
-        currentQuiz = data;
-        userAnswers = new Array(currentQuiz.questions.length).fill(null);
-        
-        displayQuiz(currentQuiz);
         document.getElementById('start-section').style.display = 'none';
         document.getElementById('quiz-container').style.display = 'block';
+        displayQuestion();
     } catch (error) {
-        console.error('Error starting quiz:', error);
-        showError('Failed to start quiz: ' + error.message);
+        showError('Error starting quiz: ' + error.message);
     }
 }
 
-// Display quiz
-function displayQuiz(quiz) {
-    const container = document.getElementById('quiz-container');
-    let html = '<form id="quiz-form">';
+function displayQuestion() {
+    const question = questions[currentQuestionIndex];
+    const quizContainer = document.getElementById('quiz-container');
     
-    quiz.questions.forEach((question, index) => {
-        html += `
-            <div class="question mb-4">
-                <p><strong>Question ${index + 1}:</strong> ${question.text}</p>
+    const html = `
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Question ${currentQuestionIndex + 1} of ${questions.length}</h5>
+                <p class="card-text">${question.question}</p>
                 <div class="options">
-                    ${question.options.map((option, optIndex) => `
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" 
-                                name="question${index}" 
-                                id="q${index}o${optIndex}" 
-                                value="${optIndex}"
-                                ${userAnswers[index] === optIndex ? 'checked' : ''}
-                                onchange="handleAnswer(${index}, ${optIndex})">
-                            <label class="form-check-label" for="q${index}o${optIndex}">
+                    ${question.options.map((option, index) => `
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="answer" value="${index}" id="option${index}">
+                            <label class="form-check-label" for="option${index}">
                                 ${option}
                             </label>
                         </div>
                     `).join('')}
                 </div>
+                <button onclick="submitAnswer()" class="btn btn-primary mt-3">Submit Answer</button>
             </div>
-        `;
-    });
-    
-    html += `
-        <div class="text-center mt-4">
-            <button type="button" class="btn btn-primary" onclick="submitQuiz()">Submit Quiz</button>
         </div>
-    </form>`;
+    `;
     
-    container.innerHTML = html;
+    quizContainer.innerHTML = html;
 }
 
-// Handle answer selection
-window.handleAnswer = function(questionIndex, optionIndex) {
-    userAnswers[questionIndex] = optionIndex;
+async function submitAnswer() {
+    const selectedOption = document.querySelector('input[name="answer"]:checked');
+    if (!selectedOption) {
+        showError('Please select an answer');
+        return;
+    }
+
+    userAnswers.push(parseInt(selectedOption.value));
+
+    if (currentQuestionIndex < questions.length - 1) {
+        currentQuestionIndex++;
+        displayQuestion();
+    } else {
+        await submitQuiz();
+    }
 }
 
-// Submit quiz
-window.submitQuiz = async function() {
+async function submitQuiz() {
     try {
-        if (!userId || !currentQuiz) {
-            showError('Invalid quiz session');
-            return;
-        }
-
-        if (!walletState.connected || !walletState.currentAccount) {
-            showError('Please connect your wallet first');
-            return;
-        }
-
         const response = await fetch('/submit_quiz', {
             method: 'POST',
             headers: {
@@ -164,120 +78,72 @@ window.submitQuiz = async function() {
             },
             body: JSON.stringify({
                 user_id: userId,
-                quiz_id: currentQuiz.quiz_id,
-                answers: userAnswers,
-                wallet_address: walletState.currentAccount
+                answers: userAnswers
             })
         });
 
-        const result = await response.json();
-        if (!result.success) {
-            throw new Error(result.error || 'Failed to submit quiz');
+        if (!response.ok) {
+            throw new Error('Failed to submit quiz');
         }
 
-        document.getElementById('quiz-container').style.display = 'none';
-        handleQuizSubmission(result.score, result.certificate);
-        showSuccess('Quiz submitted successfully!');
+        const result = await response.json();
+        displayResult(result);
 
     } catch (error) {
-        console.error('Error submitting quiz:', error);
-        showError('Failed to submit quiz: ' + error.message);
+        showError('Error submitting quiz: ' + error.message);
     }
 }
 
-function handleQuizSubmission(score, certificateData) {
+function displayResult(result) {
+    document.getElementById('quiz-container').style.display = 'none';
     const resultContainer = document.getElementById('quiz-result');
-    resultContainer.style.display = 'block';
     
-    resultContainer.innerHTML = `
-        <div class="alert ${score >= 70 ? 'alert-success' : 'alert-warning'}">
-            <h4>Quiz Complete!</h4>
-            <p>Your score: ${score}%</p>
-            ${score >= 70 ? '<p>Congratulations! You have passed the quiz.</p>' : '<p>Keep trying! You need 70% to pass.</p>'}
+    const html = `
+        <div class="card">
+            <div class="card-body text-center">
+                <h4 class="card-title">Quiz Complete!</h4>
+                <p class="card-text">Your Score: ${result.score}/${questions.length}</p>
+                <p class="card-text">Percentage: ${(result.score/questions.length * 100).toFixed(2)}%</p>
+                ${result.passed ? 
+                    `<div class="alert alert-success">Congratulations! You passed the quiz!</div>
+                     <button onclick="downloadCertificate()" class="btn btn-success mt-3">Download Certificate</button>` :
+                    `<div class="alert alert-warning">Unfortunately, you didn't pass. Please try again.</div>
+                     <button onclick="location.reload()" class="btn btn-primary mt-3">Retry Quiz</button>`
+                }
+            </div>
         </div>
     `;
-
-    if (certificateData) {
-        const certificateSection = document.createElement('div');
-        certificateSection.className = 'mt-4';
-        
-        if (certificateData.pdf_path) {
-            const downloadBtn = document.createElement('a');
-            downloadBtn.href = `/download_certificate/${userId}/${certificateData.pdf_path}`;
-            downloadBtn.className = 'btn btn-primary me-3';
-            downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download Certificate';
-            certificateSection.appendChild(downloadBtn);
-        }
-
-        if (certificateData.token_id) {
-            const verifyBtn = document.createElement('button');
-            verifyBtn.className = 'btn btn-info';
-            verifyBtn.innerHTML = '<i class="fas fa-check-circle"></i> Verify on Blockchain';
-            verifyBtn.onclick = () => verifyBlockchainCertificate(certificateData.token_id);
-            certificateSection.appendChild(verifyBtn);
-        }
-
-        resultContainer.appendChild(certificateSection);
-    }
-
-    if (score < 70) {
-        const retryBtn = document.createElement('button');
-        retryBtn.className = 'btn btn-primary mt-3';
-        retryBtn.innerHTML = 'Try Again';
-        retryBtn.onclick = startQuiz;
-        resultContainer.appendChild(retryBtn);
-    }
+    
+    resultContainer.innerHTML = html;
+    resultContainer.style.display = 'block';
 }
 
-// Helper functions
-function showError(message) {
-    const errorDiv = document.getElementById('error-message');
-    errorDiv.textContent = message;
-    errorDiv.style.display = 'block';
-    setTimeout(() => {
-        errorDiv.style.display = 'none';
-    }, 5000);
-}
-
-function showSuccess(message) {
-    const successDiv = document.getElementById('success-message');
-    successDiv.textContent = message;
-    successDiv.style.display = 'block';
-    setTimeout(() => {
-        successDiv.style.display = 'none';
-    }, 5000);
-}
-
-// Listen for account changes
-if (window.ethereum) {
-    window.ethereum.on('accountsChanged', async (accounts) => {
-        if (accounts.length === 0) {
-            walletState.connected = false;
-            walletState.currentAccount = null;
-        } else {
-            walletState.currentAccount = accounts[0];
-            walletState.connected = true;
-        }
-        updateWalletUI();
-    });
-
-    window.ethereum.on('chainChanged', (chainId) => {
-        walletState.chainId = chainId;
-        window.location.reload();
-    });
-}
-
-// Initialize wallet on page load
-document.addEventListener('DOMContentLoaded', async () => {
+async function downloadCertificate() {
     try {
-        await connectWallet();
+        const response = await fetch(`/download_certificate/${userId}`);
+        if (!response.ok) {
+            throw new Error('Failed to download certificate');
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `certificate_${userId}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
     } catch (error) {
-        console.error('Error initializing wallet:', error);
+        showError('Error downloading certificate: ' + error.message);
     }
-});
+}
 
-// Make functions available globally
-window.connectWallet = connectWallet;
-window.startQuiz = startQuiz;
-window.submitQuiz = submitQuiz;
-window.handleAnswer = handleAnswer;
+function showError(message) {
+    const errorElement = document.getElementById('error-message');
+    errorElement.textContent = message;
+    errorElement.style.display = 'block';
+    setTimeout(() => {
+        errorElement.style.display = 'none';
+    }, 5000);
+}

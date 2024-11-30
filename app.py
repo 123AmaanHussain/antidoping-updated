@@ -15,6 +15,19 @@ import time
 import requests
 import google.generativeai as genai
 from bson import ObjectId
+from werkzeug.utils import secure_filename
+import mutagen
+from mutagen.mp3 import MP3
+import feedparser
+import requests
+from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+from googleapiclient.discovery import build
+from datetime import datetime, timedelta
+import html
+from collections import deque
 
 # Load environment variables
 load_dotenv()
@@ -27,8 +40,39 @@ app = Flask(__name__, static_folder="static")
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
 CORS(app)
 
-client = MongoClient(os.getenv('MONGO_URI', 'mongodb://localhost:27017/'))
-db = client['gamified_quizzes']
+# Initialize MongoDB connection with error handling
+try:
+    client = MongoClient(os.getenv('MONGO_URI', 'mongodb://localhost:27017/'), serverSelectionTimeoutMS=5000)
+    client.server_info()  # This will raise an exception if MongoDB is not running
+    db = client['gamified_quizzes']
+    logging.info("Successfully connected to MongoDB")
+except Exception as e:
+    logging.error(f"Failed to connect to MongoDB: {str(e)}")
+    # Create an in-memory quiz storage as fallback
+    class InMemoryQuizDB:
+        def __init__(self):
+            self.quizzes = {}
+            self.quiz_results = {}
+        
+        def find_one(self, query, projection=None):
+            quiz_id = query.get('quiz_id')
+            return self.quizzes.get(quiz_id)
+        
+        def insert_one(self, document):
+            if 'quiz_id' in document:
+                self.quizzes[document['quiz_id']] = document
+            return type('obj', (object,), {'inserted_id': 1})
+        
+        def drop(self):
+            self.quizzes.clear()
+    
+    db = type('obj', (object,), {
+        'quizzes': InMemoryQuizDB(),
+        'quiz_results': {},
+        'podcasts': {}
+    })
+    logging.warning("Using in-memory storage as fallback")
+
 nutrition_plans = db.nutrition_plans
 
 # Initialize logging
@@ -59,119 +103,67 @@ model = genai.GenerativeModel('gemini-pro')
 # Create certificates directory if it doesn't exist
 os.makedirs('certificates', exist_ok=True)
 
-# Initialize MongoDB with quiz data
-def init_quiz_data():
-    try:
-        # Drop existing quiz data to ensure clean state
-        db.quizzes.drop()
-        
-        sample_quiz = {
-            "quiz_id": "quiz1",
-            "title": "Anti-Doping Basics",
-            "questions": [
-                {
-                    "text": "What is WADA?",
-                    "options": [
-                        "World Athletics Development Association",
-                        "World Anti-Doping Agency",
-                        "World Athletics Doping Authority",
-                        "World Agency for Doping Analysis"
-                    ],
-                    "correct_answer": 1
-                },
-                {
-                    "text": "Which of these is a prohibited substance?",
-                    "options": [
-                        "Vitamin C",
-                        "Caffeine",
-                        "Anabolic Steroids",
-                        "Protein Powder"
-                    ],
-                    "correct_answer": 2
-                },
-                {
-                    "text": "How often should athletes check the prohibited substances list?",
-                    "options": [
-                        "Once a year",
-                        "Every 6 months",
-                        "Only when prescribed new medication",
-                        "Regularly, as it's updated frequently"
-                    ],
-                    "correct_answer": 3
-                }
-            ]
-        }
-        
-        result = db.quizzes.insert_one(sample_quiz)
-        logging.info(f"Initialized quiz data with ID: {result.inserted_id}")
-        return True
-    except Exception as e:
-        logging.error(f"Error initializing quiz data: {str(e)}")
-        return False
+# Configure upload folder for podcasts
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'podcasts')
+ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg'}
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Initialize quiz data
-if not init_quiz_data():
-    logging.error("Failed to initialize quiz data")
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Quiz data - you can expand this with more questions
-QUIZ_DATA = {
-    'quiz': {
-        'quiz_id': 'antidoping_basics',
-        'title': 'Anti-Doping Basics Quiz',
-        'questions': [
-            {
-                'text': 'What is the main purpose of anti-doping regulations?',
-                'options': [
-                    'To ensure fair competition and protect athlete health',
-                    'To make sports more entertaining',
-                    'To increase athletic performance',
-                    'To reduce sports participation'
-                ],
-                'correct': 0
-            },
-            {
-                'text': 'Which organization is responsible for the World Anti-Doping Code?',
-                'options': [
-                    'FIFA',
-                    'IOC',
-                    'WADA',
-                    'UEFA'
-                ],
-                'correct': 2
-            },
-            {
-                'text': 'What is a "prohibited substance"?',
-                'options': [
-                    'Any substance that enhances performance',
-                    'Substances listed on the WADA Prohibited List',
-                    'Illegal drugs only',
-                    'Substances chosen by sports federations'
-                ],
-                'correct': 1
-            },
-            {
-                'text': 'How often is the WADA Prohibited List updated?',
-                'options': [
-                    'Monthly',
-                    'Every six months',
-                    'Annually',
-                    'Every two years'
-                ],
-                'correct': 2
-            },
-            {
-                'text': 'What is a TUE in anti-doping?',
-                'options': [
-                    'Technical Use Exemption',
-                    'Therapeutic Use Exemption',
-                    'Temporary Use Exception',
-                    'Training Under Examination'
-                ],
-                'correct': 1
-            }
-        ]
+# Podcast categories
+PODCAST_CATEGORIES = [
+    'Anti-Doping Rules',
+    'Athlete Stories',
+    'News & Updates',
+    'Training & Education',
+    'Clean Sport',
+    'Health & Wellness'
+]
+
+# Sample podcast data
+SAMPLE_PODCASTS = [
+    {
+        'title': 'Understanding Anti-Doping Rules',
+        'description': 'A comprehensive guide to anti-doping regulations and their importance in sports.',
+        'category': 'Anti-Doping Rules',
+        'author': 'Dr. Sarah Johnson',
+        'duration': 1800,  # 30 minutes
+        'filename': 'understanding_antidoping.mp3',
+        'upload_date': datetime.utcnow()
+    },
+    {
+        'title': 'Athlete Stories: Clean Sport Champions',
+        'description': 'Listen to inspiring stories from athletes who compete clean and promote fair play.',
+        'category': 'Athlete Stories',
+        'author': 'Michael Chen',
+        'duration': 1200,  # 20 minutes
+        'filename': 'clean_sport_champions.mp3',
+        'upload_date': datetime.utcnow()
+    },
+    {
+        'title': 'Latest Updates in Anti-Doping Policies',
+        'description': 'Stay informed about the latest developments and changes in anti-doping policies.',
+        'category': 'News & Updates',
+        'author': 'Emma Williams',
+        'duration': 900,  # 15 minutes
+        'filename': 'policy_updates.mp3',
+        'upload_date': datetime.utcnow()
     }
-}
+]
+
+def init_sample_podcasts():
+    try:
+        # Check if podcasts collection exists and is empty
+        if 'podcasts' not in db.list_collection_names() or db.podcasts.count_documents({}) == 0:
+            # Insert sample podcasts
+            db.podcasts.insert_many(SAMPLE_PODCASTS)
+            logging.info("Initialized sample podcast data")
+    except Exception as e:
+        logging.error(f"Error initializing sample podcasts: {str(e)}")
+
+# Initialize sample podcasts when app starts
+init_sample_podcasts()
 
 # News cache
 news_cache = {
@@ -199,58 +191,57 @@ def smartlabels():
 @app.route('/antidopingwiki')
 def antidopingwiki():
     global news_cache
-    current_time = datetime.now()
+    current_time = datetime.utcnow()
     
     # Check if we have cached news that's less than 30 minutes old
     if (news_cache['last_update'] and 
-        news_cache['data'] and 
         (current_time - news_cache['last_update']).total_seconds() < 1800):
         return render_template('antidopingwiki.html', news=news_cache['data'])
     
-    # Get news about sports and doping
-    all_news = []
     try:
-        # Get news about doping in sports
-        doping_news = newsapi.get_everything(
+        # Fetch news about doping in sports
+        doping_response = newsapi.get_everything(
             q='doping sports athletics',
             language='en',
             sort_by='publishedAt',
-            from_param=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+            from_param=(datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d'),
             page_size=10
         )
         
-        # Get general sports news
-        sports_news = newsapi.get_top_headlines(
+        # Fetch general sports news
+        sports_response = newsapi.get_top_headlines(
             category='sports',
             language='en',
             page_size=10
         )
         
+        all_news = []
+        
         # Process doping news
-        if doping_news.get('status') == 'ok' and doping_news.get('articles'):
-            for article in doping_news['articles']:
+        if doping_response.get('status') == 'ok' and doping_response.get('articles'):
+            for article in doping_response['articles']:
                 if article.get('title') and article.get('description'):
                     all_news.append({
                         'title': article.get('title', ''),
                         'description': article.get('description', ''),
                         'url': article.get('url', '#'),
                         'image': article.get('urlToImage', None),
-                        'publishedAt': datetime.strptime(article.get('publishedAt', datetime.now().isoformat()), 
+                        'publishedAt': datetime.strptime(article.get('publishedAt', datetime.utcnow().isoformat()), 
                                                        '%Y-%m-%dT%H:%M:%SZ').strftime('%B %d, %Y'),
                         'source': article.get('source', {}).get('name', 'Unknown Source'),
                         'category': 'Doping News'
                     })
             
         # Process sports news
-        if sports_news.get('status') == 'ok' and sports_news.get('articles'):
-            for article in sports_news['articles']:
+        if sports_response.get('status') == 'ok' and sports_response.get('articles'):
+            for article in sports_response['articles']:
                 if article.get('title') and article.get('description'):
                     all_news.append({
                         'title': article.get('title', ''),
                         'description': article.get('description', ''),
                         'url': article.get('url', '#'),
                         'image': article.get('urlToImage', None),
-                        'publishedAt': datetime.strptime(article.get('publishedAt', datetime.now().isoformat()),
+                        'publishedAt': datetime.strptime(article.get('publishedAt', datetime.utcnow().isoformat()),
                                                        '%Y-%m-%dT%H:%M:%SZ').strftime('%B %d, %Y'),
                         'source': article.get('source', {}).get('name', 'Unknown Source'),
                         'category': 'Sports News'
@@ -276,7 +267,7 @@ def antidopingwiki():
                     'description': 'This is a sample sports news article. The news API might be temporarily unavailable.',
                     'url': '#',
                     'image': None,
-                    'publishedAt': datetime.now().strftime('%B %d, %Y'),
+                    'publishedAt': datetime.utcnow().strftime('%B %d, %Y'),
                     'source': 'Sample Source',
                     'category': 'Sports News'
                 },
@@ -285,7 +276,7 @@ def antidopingwiki():
                     'description': 'This is a sample doping news article. The news API might be temporarily unavailable.',
                     'url': '#',
                     'image': None,
-                    'publishedAt': datetime.now().strftime('%B %d, %Y'),
+                    'publishedAt': datetime.utcnow().strftime('%B %d, %Y'),
                     'source': 'Sample Source',
                     'category': 'Doping News'
                 }
@@ -308,9 +299,9 @@ def games():
 @app.route('/get_quiz/<quiz_id>')
 def get_quiz(quiz_id):
     try:
-        logging.info(f"Fetching quiz with ID: {quiz_id}")  # Debug log
+        logging.info(f"Fetching quiz with ID: {quiz_id}")
         quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
-        logging.info(f"Found quiz: {quiz}")  # Debug log
+        logging.info(f"Found quiz: {quiz}")
         
         if not quiz:
             # Try to initialize quiz data
@@ -318,66 +309,423 @@ def get_quiz(quiz_id):
                 quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
         
         if quiz:
-            return jsonify(quiz)
-        return jsonify({"error": "Quiz not found"}), 404
+            return jsonify({
+                "success": True,
+                "quiz": quiz
+            })
+        
+        return jsonify({
+            "success": False,
+            "error": "Quiz not found"
+        }), 404
+        
     except Exception as e:
         logging.error(f"Error getting quiz: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
-def generate_pdf_certificate(user_id, quiz_id, score, timestamp):
-    """Generate a PDF certificate for quiz completion"""
+class PodcastFetcher:
+    def __init__(self):
+        """Initialize the podcast fetcher with API clients"""
+        # Initialize Spotify client
+        self.spotify = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials())
+        
+        # Initialize YouTube client
+        self.youtube = build('youtube', 'v3', developerKey=os.environ.get('YOUTUBE_API_KEY'))
+        
+        # Anti-doping related keywords for content filtering
+        self.antidoping_keywords = [
+            'anti-doping', 'antidoping', 'doping', 'wada', 'usada', 'clean sport',
+            'drug testing', 'prohibited substances', 'banned substances', 'athlete integrity',
+            'sports integrity', 'fair play', 'clean athlete', 'performance enhancing',
+            'drug free sport', 'anti doping violation', 'therapeutic use exemption', 'tue',
+            'whereabouts', 'testing pool', 'biological passport', 'prohibited list',
+            'anti-doping rule', 'sample collection', 'doping control', 'adams',
+            'world anti-doping', 'national anti-doping', 'doping test'
+        ]
+        
+        # Search queries for finding relevant content
+        self.search_queries = [
+            'anti-doping podcast',
+            'clean sport podcast',
+            'doping in sports podcast',
+            'sports integrity podcast',
+            'wada podcast',
+            'usada podcast'
+        ]
+        
+        # YouTube channel IDs
+        self.youtube_channels = [
+            'UCQxkGRRkhVeOQpwR9WEsV3A',  # World Anti-Doping Agency (WADA)
+            'UCuJcLm5uNXtXUVHHLs2W_-Q',  # U.S. Anti-Doping Agency (USADA)
+            'UC5nU0k_KnOXAwK_6cLvjfDQ'   # UK Anti-Doping (UKAD)
+        ]
+        
+        # Rate limiting attributes
+        self.spotify_calls = deque(maxlen=30)  # Track last 30 Spotify API calls
+        self.youtube_quota = {
+            'daily_limit': 10000,
+            'used': 0,
+            'reset_time': datetime.now()
+        }
+        
+        # Add iTunes search URL
+        self.itunes_search_url = "https://itunes.apple.com/search"
+        
+    def is_antidoping_content(self, title, description):
+        """Check if content is related to sports or anti-doping based on title and description"""
+        # Make the filter more lenient by always returning True to get all content
+        return True
+
+    def _check_spotify_rate_limit(self):
+        """Implement Spotify rate limiting - 30 requests per second"""
+        now = time.time()
+        # Remove calls older than 1 second
+        while self.spotify_calls and self.spotify_calls[0] < now - 1:
+            self.spotify_calls.popleft()
+        
+        if len(self.spotify_calls) >= 30:
+            sleep_time = 1 - (now - self.spotify_calls[0])
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+        
+        self.spotify_calls.append(now)
+
+    def _check_youtube_quota(self, cost=1):
+        """Check YouTube API quota"""
+        now = datetime.now()
+        
+        # Reset quota if it's a new day
+        if now.date() > self.youtube_quota['reset_time'].date():
+            self.youtube_quota['used'] = 0
+            self.youtube_quota['reset_time'] = now
+        
+        # Check if we have enough quota
+        if self.youtube_quota['used'] + cost > self.youtube_quota['daily_limit']:
+            raise Exception("YouTube API daily quota exceeded")
+        
+        self.youtube_quota['used'] += cost
+
+    def fetch_spotify_podcasts(self):
+        """Fetch sports and anti-doping related episodes from Spotify using search"""
+        podcasts = []
+        try:
+            logging.info("Starting Spotify podcast search")
+            
+            # Broader search queries
+            search_terms = ['sports', 'athlete', 'olympic', 'fitness', 'training', 'health']
+            
+            # Search for podcasts using our queries
+            for query in search_terms:
+                try:
+                    self._check_spotify_rate_limit()
+                    results = self.spotify.search(q=query, type='show', market='US', limit=10)
+                    
+                    if not results or 'shows' not in results or 'items' not in results['shows']:
+                        continue
+                    
+                    for show in results['shows']['items']:
+                        try:
+                            show_id = show['id']
+                            show_name = show['name']
+                            publisher = show['publisher']
+                            
+                            episodes = self.spotify.show_episodes(show_id, limit=5, market='US')
+                            
+                            if not episodes or 'items' not in episodes:
+                                continue
+                            
+                            for episode in episodes['items']:
+                                try:
+                                    podcast = {
+                                        'title': episode['name'],
+                                        'description': episode.get('description', '')[:500],
+                                        'author': publisher,
+                                        'published_date': episode.get('release_date', ''),
+                                        'image_url': episode['images'][0]['url'] if episode.get('images') and episode['images'] else None,
+                                        'source_url': episode['external_urls']['spotify'] if episode.get('external_urls') else '',
+                                        'source_type': 'spotify',
+                                        'category': self._categorize_content(episode['name'], episode.get('description', '')),
+                                        'language': episode.get('language', 'en'),
+                                        'duration_ms': episode.get('duration_ms', 0)
+                                    }
+                                    
+                                    if not any(p['source_url'] == podcast['source_url'] for p in podcasts):
+                                        podcasts.append(podcast)
+                                        
+                                except Exception as episode_error:
+                                    continue
+                                    
+                        except Exception:
+                            continue
+                            
+                except Exception as search_error:
+                    if "429" in str(search_error):
+                        time.sleep(5)
+                    continue
+                    
+        except Exception as e:
+            logging.error(f"Error in fetch_spotify_podcasts: {str(e)}")
+        
+        return podcasts
+
+    def fetch_youtube_videos(self):
+        """Fetch sports and fitness related videos from YouTube"""
+        videos = []
+        try:
+            logging.info("Starting YouTube video fetch")
+            
+            # Broader search terms
+            search_terms = ['sports', 'athlete', 'fitness', 'training', 'olympics']
+            
+            for term in search_terms:
+                try:
+                    self._check_youtube_quota(cost=1)
+                    
+                    search_request = self.youtube.search().list(
+                        part="snippet",
+                        q=term,
+                        maxResults=10,
+                        order="date",
+                        type="video"
+                    ).execute()
+                    
+                    if not search_request.get('items'):
+                        continue
+                    
+                    for item in search_request['items']:
+                        try:
+                            snippet = item['snippet']
+                            
+                            video = {
+                                'title': snippet['title'],
+                                'description': snippet.get('description', '')[:500],
+                                'author': snippet['channelTitle'],
+                                'published_date': snippet['publishedAt'],
+                                'image_url': snippet.get('thumbnails', {}).get('high', {}).get('url'),
+                                'source_url': f"https://www.youtube.com/watch?v={item['id']['videoId']}",
+                                'source_type': 'youtube',
+                                'category': self._categorize_content(snippet['title'], snippet.get('description', '')),
+                                'language': 'en'
+                            }
+                            
+                            if not any(v['source_url'] == video['source_url'] for v in videos):
+                                videos.append(video)
+                                
+                        except Exception:
+                            continue
+                            
+                except Exception as search_error:
+                    if "quotaExceeded" in str(search_error):
+                        break
+                    elif "429" in str(search_error):
+                        time.sleep(60)
+                    continue
+                    
+        except Exception as e:
+            logging.error(f"Error in fetch_youtube_videos: {str(e)}")
+        
+        return videos
+
+    def fetch_itunes_podcasts(self):
+        """Fetch sports and fitness related podcasts from iTunes"""
+        podcasts = []
+        try:
+            logging.info("Starting iTunes podcast search")
+            
+            # Broader search terms
+            search_terms = ['sports', 'athlete', 'fitness', 'training', 'olympics']
+            
+            for query in search_terms:
+                try:
+                    params = {
+                        'term': query,
+                        'entity': 'podcast',
+                        'limit': 20,
+                        'media': 'podcast'
+                    }
+                    
+                    response = requests.get(self.itunes_search_url, params=params)
+                    if response.status_code == 200:
+                        results = response.json()
+                        
+                        for item in results.get('results', []):
+                            try:
+                                podcast = {
+                                    'title': item.get('collectionName', ''),
+                                    'description': item.get('description', '')[:500],
+                                    'author': item.get('artistName', ''),
+                                    'published_date': datetime.now().strftime('%Y-%m-%d'),
+                                    'image_url': item.get('artworkUrl600', ''),
+                                    'source_url': item.get('collectionViewUrl', ''),
+                                    'source_type': 'itunes',
+                                    'category': self._categorize_content(
+                                        item.get('collectionName', ''),
+                                        item.get('description', '')
+                                    ),
+                                    'language': 'en'
+                                }
+                                
+                                if not any(p['source_url'] == podcast['source_url'] for p in podcasts):
+                                    podcasts.append(podcast)
+                                    
+                            except Exception:
+                                continue
+                                
+                    time.sleep(1)
+                    
+                except Exception:
+                    continue
+                    
+        except Exception as e:
+            logging.error(f"Error in fetch_itunes_podcasts: {str(e)}")
+            
+        return podcasts
+
+    def fetch_all_podcasts(self):
+        """Fetch podcasts from all available sources"""
+        all_podcasts = []
+        
+        # Try iTunes first as it's more reliable
+        itunes_podcasts = self.fetch_itunes_podcasts()
+        all_podcasts.extend(itunes_podcasts)
+        
+        try:
+            # Try Spotify if iTunes doesn't return enough results
+            if len(all_podcasts) < 20:
+                spotify_podcasts = self.fetch_spotify_podcasts()
+                all_podcasts.extend(spotify_podcasts)
+        except Exception as spotify_error:
+            logging.warning(f"Spotify fetch failed, continuing with iTunes results: {str(spotify_error)}")
+        
+        try:
+            # Add YouTube videos as supplementary content
+            youtube_videos = self.fetch_youtube_videos()
+            all_podcasts.extend(youtube_videos)
+        except Exception as youtube_error:
+            logging.warning(f"YouTube fetch failed, continuing with podcast results: {str(youtube_error)}")
+        
+        return all_podcasts
+
+    def _categorize_content(self, title, description):
+        """Categorize content based on title and description"""
+        title_lower = title.lower()
+        description_lower = description.lower()
+        
+        # Define category keywords
+        categories = {
+            'Rules & Compliance': ['rule', 'compliance', 'violation', 'sanction', 'regulation', 'policy'],
+            'Testing & Science': ['test', 'sample', 'laboratory', 'biological passport', 'analysis'],
+            'Education': ['education', 'learn', 'guide', 'understand', 'awareness'],
+            'Athlete Stories': ['story', 'interview', 'experience', 'journey', 'athlete'],
+            'Updates & News': ['update', 'news', 'announcement', 'latest', 'change'],
+            'Clean Sport': ['clean sport', 'integrity', 'fair play', 'values']
+        }
+        
+        # Check each category
+        for category, keywords in categories.items():
+            for keyword in keywords:
+                if keyword in title_lower or keyword in description_lower:
+                    return category
+        
+        return 'General Anti-Doping'
+
+@app.route('/api/podcasts')
+def get_podcasts():
+    """API endpoint to get sports and anti-doping podcasts from various sources"""
     try:
-        # Create certificates directory if it doesn't exist
-        certificate_dir = os.path.join(os.path.dirname(__file__), 'certificates')
-        os.makedirs(certificate_dir, exist_ok=True)
-        
-        # Initialize PDF
-        pdf = FPDF()
-        pdf.add_page()
-        
-        # Add certificate styling
-        pdf.set_font("Arial", "B", 24)
-        pdf.set_text_color(44, 62, 80)  # Dark blue color
-        pdf.cell(0, 30, "Certificate of Achievement", ln=True, align='C')
-        
-        # Add logo if exists
-        logo_path = os.path.join(os.path.dirname(__file__), 'static', 'images', 'logo.png')
-        if os.path.exists(logo_path):
-            pdf.image(logo_path, x=85, y=50, w=40)
-        
-        # Certificate content
-        pdf.set_font("Arial", "", 16)
-        pdf.ln(60)  # Add some space after logo
-        pdf.cell(0, 10, "This is to certify that", ln=True, align='C')
-        
-        pdf.set_font("Arial", "B", 18)
-        pdf.cell(0, 15, f"User ID: {user_id}", ln=True, align='C')
-        
-        pdf.set_font("Arial", "", 16)
-        pdf.cell(0, 10, "has successfully completed the", ln=True, align='C')
-        pdf.cell(0, 10, "Anti-Doping Awareness Quiz", ln=True, align='C')
-        pdf.cell(0, 10, f"with a score of {score}%", ln=True, align='C')
-        
-        # Add date
-        pdf.set_font("Arial", "I", 14)
-        pdf.cell(0, 20, f"Date: {timestamp.strftime('%B %d, %Y')}", ln=True, align='C')
-        
-        # Add verification text
-        pdf.set_font("Arial", "", 10)
-        pdf.set_text_color(128, 128, 128)  # Gray color
-        pdf.cell(0, 10, "This certificate's authenticity can be verified on the blockchain", ln=True, align='C')
-        
-        # Generate unique filename
-        filename = f"{user_id}_{quiz_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.pdf"
-        filepath = os.path.join(certificate_dir, filename)
-        
-        # Save PDF
-        pdf.output(filepath)
-        return filepath
-        
+        # Initialize podcast fetcher if not already initialized
+        if not hasattr(app, 'podcast_fetcher'):
+            try:
+                app.podcast_fetcher = PodcastFetcher()
+            except Exception as init_error:
+                logging.error(f"Failed to initialize podcast fetcher: {str(init_error)}")
+                return jsonify({
+                    'success': False,
+                    'error': f"Failed to initialize podcast fetcher: {str(init_error)}"
+                }), 500
+
+        # Sample podcasts as fallback
+        sample_podcasts = [
+            {
+                'title': 'Clean Sport Insights',
+                'description': 'A podcast about maintaining integrity in sports and understanding anti-doping measures.',
+                'author': 'Sports Integrity Unit',
+                'published_date': datetime.now().strftime('%Y-%m-%d'),
+                'image_url': '/static/images/podcast-placeholder.jpg',
+                'source_url': '#',
+                'source_type': 'sample',
+                'category': 'Education & Prevention',
+                'language': 'en'
+            },
+            {
+                'title': 'The Athlete\'s Corner',
+                'description': 'Weekly discussions about sports, training, and athlete well-being.',
+                'author': 'Sports Network',
+                'published_date': datetime.now().strftime('%Y-%m-%d'),
+                'image_url': '/static/images/podcast-placeholder.jpg',
+                'source_url': '#',
+                'source_type': 'sample',
+                'category': 'Athlete Stories',
+                'language': 'en'
+            },
+            {
+                'title': 'Sports Science Today',
+                'description': 'Exploring the latest developments in sports science and performance.',
+                'author': 'Science in Sports',
+                'published_date': datetime.now().strftime('%Y-%m-%d'),
+                'image_url': '/static/images/podcast-placeholder.jpg',
+                'source_url': '#',
+                'source_type': 'sample',
+                'category': 'Testing & Science',
+                'language': 'en'
+            }
+        ]
+
+        all_podcasts = []
+
+        # Try to fetch from each source independently
+        try:
+            itunes_podcasts = app.podcast_fetcher.fetch_itunes_podcasts()
+            if itunes_podcasts:
+                all_podcasts.extend(itunes_podcasts)
+        except Exception as itunes_error:
+            logging.error(f"iTunes fetch failed: {str(itunes_error)}")
+
+        try:
+            spotify_podcasts = app.podcast_fetcher.fetch_spotify_podcasts()
+            if spotify_podcasts:
+                all_podcasts.extend(spotify_podcasts)
+        except Exception as spotify_error:
+            logging.error(f"Spotify fetch failed: {str(spotify_error)}")
+
+        try:
+            youtube_videos = app.podcast_fetcher.fetch_youtube_videos()
+            if youtube_videos:
+                all_podcasts.extend(youtube_videos)
+        except Exception as youtube_error:
+            logging.error(f"YouTube fetch failed: {str(youtube_error)}")
+
+        # If no podcasts were found from any source, use sample podcasts
+        if not all_podcasts:
+            logging.info("No podcasts found from external sources, using sample podcasts")
+            all_podcasts = sample_podcasts
+
+        # Return all found podcasts
+        return jsonify({
+            'success': True,
+            'data': all_podcasts
+        })
+
     except Exception as e:
-        app.logger.error(f"Error generating PDF certificate: {str(e)}")
-        raise
+        logging.error(f"Error in get_podcasts: {str(e)}")
+        # Return sample podcasts on error
+        return jsonify({
+            'success': True,
+            'data': sample_podcasts
+        })
 
 @app.route('/submit_quiz', methods=['POST'])
 def submit_quiz():
@@ -385,7 +733,7 @@ def submit_quiz():
         data = request.get_json()
         
         # Validate required fields
-        required_fields = ['user_id', 'quiz_id', 'answers', 'wallet_address']
+        required_fields = ['user_id', 'quiz_id', 'answers']
         for field in required_fields:
             if field not in data:
                 raise ValueError(f"Missing required field: {field}")
@@ -393,7 +741,7 @@ def submit_quiz():
         user_id = data['user_id']
         quiz_id = data['quiz_id']
         answers = data['answers']
-        wallet_address = data['wallet_address']
+        email = data.get('email', '')  # Optional email for blockchain certificate
 
         # Get quiz data
         quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
@@ -414,7 +762,7 @@ def submit_quiz():
             'quiz_id': quiz_id,
             'score': score,
             'answers': answers,
-            'wallet_address': wallet_address,
+            'email': email,
             'timestamp': timestamp
         }
         
@@ -422,8 +770,20 @@ def submit_quiz():
         certificate_data = None
         if score >= 70:
             try:
-                # Generate PDF certificate
-                pdf_path = generate_pdf_certificate(user_id, quiz_id, score, timestamp)
+                token_id = None
+                # Attempt to mint blockchain certificate only if email is provided
+                if email and blockchain_service:
+                    try:
+                        token_id = blockchain_service.mint_certificate(
+                            recipient_email=email,
+                            quiz_title=quiz['title'],
+                            score=int(score)
+                        )
+                    except Exception as e:
+                        app.logger.error(f"Error minting blockchain certificate: {str(e)}")
+                
+                # Generate PDF certificate with token_id if available
+                pdf_path = generate_pdf_certificate(user_id, quiz_id, score, timestamp, token_id)
                 
                 # Store certificate path
                 quiz_result['pdf_certificate'] = os.path.basename(pdf_path)
@@ -433,19 +793,9 @@ def submit_quiz():
                     'user_id': user_id,
                     'quiz_id': quiz_id,
                     'score': score,
-                    'timestamp': timestamp.isoformat()
+                    'timestamp': timestamp.isoformat(),
+                    'token_id': token_id
                 }
-                
-                # Attempt to mint blockchain certificate
-                token_id = None
-                try:
-                    token_id = blockchain_service.mint_certificate(
-                        recipient_address=wallet_address,
-                        quiz_title=quiz['title'],
-                        score=int(score)
-                    )
-                except Exception as e:
-                    app.logger.error(f"Error minting blockchain certificate: {str(e)}")
                 
                 certificate_data = {
                     'token_id': token_id,
@@ -701,6 +1051,270 @@ def ai_coach_api():
             'success': False
         }), 500
 
+def generate_pdf_certificate(user_id, quiz_id, score, timestamp, token_id=None):
+    """Generate a PDF certificate for quiz completion"""
+    try:
+        # Create certificates directory if it doesn't exist
+        certificate_dir = os.path.join(os.path.dirname(__file__), 'certificates')
+        os.makedirs(certificate_dir, exist_ok=True)
+        
+        # Initialize PDF
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # Set margins
+        pdf.set_margins(20, 20, 20)
+        
+        # Add certificate styling
+        pdf.set_font("Arial", "B", 24)
+        pdf.set_text_color(44, 62, 80)  # Dark blue color
+        pdf.cell(0, 30, "Certificate of Achievement", ln=True, align='C')
+        
+        # Add decorative line
+        pdf.set_draw_color(41, 128, 185)  # Light blue
+        pdf.set_line_width(1)
+        pdf.line(30, 45, 180, 45)
+        
+        # Certificate content
+        pdf.set_font("Arial", "", 16)
+        pdf.set_text_color(52, 73, 94)  # Dark gray
+        pdf.cell(0, 30, "This is to certify that", ln=True, align='C')
+        
+        # User ID
+        pdf.set_font("Arial", "B", 20)
+        pdf.cell(0, 15, user_id, ln=True, align='C')
+        
+        # Achievement text
+        pdf.set_font("Arial", "", 16)
+        pdf.cell(0, 15, "has successfully completed the", ln=True, align='C')
+        pdf.set_font("Arial", "B", 18)
+        pdf.cell(0, 15, "Anti-Doping Awareness Quiz", ln=True, align='C')
+        
+        # Score
+        pdf.set_font("Arial", "", 16)
+        pdf.cell(0, 15, f"with a score of", ln=True, align='C')
+        pdf.set_font("Arial", "B", 20)
+        pdf.set_text_color(41, 128, 185)  # Light blue
+        pdf.cell(0, 15, f"{score}%", ln=True, align='C')
+        
+        # Date
+        pdf.set_font("Arial", "", 12)
+        pdf.set_text_color(52, 73, 94)  # Dark gray
+        date_str = timestamp.strftime("%B %d, %Y")
+        pdf.cell(0, 15, f"Date: {date_str}", ln=True, align='C')
+        
+        # Add blockchain verification code if available
+        if token_id:
+            try:
+                # Add verification section
+                pdf.ln(10)
+                pdf.set_font("Arial", "", 10)
+                pdf.set_text_color(128, 128, 128)  # Gray color
+                pdf.cell(0, 10, "Certificate Verification", ln=True, align='C')
+                
+                # Create verification string
+                verification_string = f"0x{token_id:016x}"
+                
+                # Generate QR code
+                import qrcode
+                from PIL import Image
+                import io
+                
+                # Create QR code
+                qr = qrcode.QRCode(
+                    version=1,
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=10,
+                    border=4,
+                )
+                qr.add_data(verification_string)
+                qr.make(fit=True)
+                
+                # Create QR code image
+                qr_img = qr.make_image(fill_color="black", back_color="white")
+                
+                # Save QR code to bytes
+                img_byte_arr = io.BytesIO()
+                qr_img.save(img_byte_arr, format='PNG')
+                img_byte_arr = img_byte_arr.getvalue()
+                
+                # Save temporary image file
+                temp_qr_path = os.path.join(certificate_dir, f'temp_qr_{user_id}.png')
+                with open(temp_qr_path, 'wb') as f:
+                    f.write(img_byte_arr)
+                
+                # Add QR code to PDF
+                pdf.image(temp_qr_path, x=85, y=pdf.get_y(), w=40, h=40)
+                
+                # Remove temporary file
+                os.remove(temp_qr_path)
+                
+                # Add some space after QR code
+                pdf.ln(45)
+                
+                # Add verification code
+                pdf.set_font("Courier", "", 8)
+                pdf.cell(0, 5, "Blockchain Verification Code:", ln=True, align='C')
+                pdf.cell(0, 5, verification_string, ln=True, align='C')
+                
+            except Exception as e:
+                logging.error(f"Error adding QR code: {str(e)}")
+                # Still add verification code even if QR fails
+                pdf.ln(10)
+                pdf.set_font("Courier", "", 8)
+                pdf.cell(0, 5, "Blockchain Verification Code:", ln=True, align='C')
+                pdf.cell(0, 5, f"0x{token_id:016x}", ln=True, align='C')
+        
+        # Generate unique filename
+        filename = f"certificate_{user_id}_{quiz_id}_{int(timestamp.timestamp())}.pdf"
+        filepath = os.path.join(certificate_dir, filename)
+        
+        # Save the PDF
+        pdf.output(filepath)
+        return filepath
+        
+    except Exception as e:
+        logging.error(f"Error generating certificate: {str(e)}")
+        raise
+
+@app.route('/api/podcasts/upload', methods=['POST'])
+def upload_podcast():
+    try:
+        if 'audio_file' not in request.files:
+            return jsonify({'success': False, 'error': 'No audio file provided'}), 400
+            
+        file = request.files['audio_file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No selected file'}), 400
+            
+        if not file.filename.endswith('.mp3'):
+            return jsonify({'success': False, 'error': 'Only MP3 files are supported'}), 400
+        
+        # Secure the filename
+        filename = secure_filename(file.filename)
+        
+        # Create uploads directory if it doesn't exist
+        upload_dir = os.path.join(app.root_path, 'static', 'podcasts')
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # Save the file
+        file_path = os.path.join(upload_dir, filename)
+        file.save(file_path)
+        
+        # Get audio duration using mutagen
+        try:
+            audio = MP3(file_path)
+            duration = int(audio.info.length)
+        except Exception as e:
+            duration = 0
+            logging.error(f"Error getting audio duration: {str(e)}")
+        
+        # Create podcast document
+        podcast = {
+            'title': request.form.get('title', 'Untitled Podcast'),
+            'description': request.form.get('description', ''),
+            'category': request.form.get('category', 'Training & Education'),
+            'author': request.form.get('author', 'Anonymous'),
+            'filename': filename,
+            'duration': duration,
+            'upload_date': datetime.utcnow(),
+            'language': request.form.get('language', 'en'),
+            'tags': request.form.get('tags', '').split(',') if request.form.get('tags') else []
+        }
+        
+        # Save to MongoDB
+        result = db.podcasts.insert_one(podcast)
+        podcast['_id'] = str(result.inserted_id)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Podcast uploaded successfully',
+            'podcast': podcast
+        })
+        
+    except Exception as e:
+        logging.error(f"Error uploading podcast: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/podcasts/<podcast_id>', methods=['DELETE'])
+def delete_podcast(podcast_id):
+    try:
+        # Find the podcast
+        podcast = db.podcasts.find_one({'_id': ObjectId(podcast_id)})
+        if not podcast:
+            return jsonify({'success': False, 'error': 'Podcast not found'}), 404
+            
+        # Delete the audio file
+        file_path = os.path.join(app.root_path, 'static', 'podcasts', podcast['filename'])
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            
+        # Delete from MongoDB
+        db.podcasts.delete_one({'_id': ObjectId(podcast_id)})
+        
+        return jsonify({'success': True, 'message': 'Podcast deleted successfully'})
+        
+    except Exception as e:
+        logging.error(f"Error deleting podcast: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/podcasts/<podcast_id>', methods=['PUT'])
+def update_podcast(podcast_id):
+    try:
+        # Get the podcast
+        podcast = db.podcasts.find_one({'_id': ObjectId(podcast_id)})
+        if not podcast:
+            return jsonify({'success': False, 'error': 'Podcast not found'}), 404
+            
+        # Update fields
+        update_data = {
+            'title': request.form.get('title', podcast['title']),
+            'description': request.form.get('description', podcast['description']),
+            'category': request.form.get('category', podcast['category']),
+            'author': request.form.get('author', podcast['author']),
+            'language': request.form.get('language', podcast.get('language', 'en')),
+            'tags': request.form.get('tags', '').split(',') if request.form.get('tags') else podcast.get('tags', [])
+        }
+        
+        # Update audio file if provided
+        if 'audio_file' in request.files:
+            file = request.files['audio_file']
+            if file.filename != '' and file.filename.endswith('.mp3'):
+                # Delete old file
+                old_file_path = os.path.join(app.root_path, 'static', 'podcasts', podcast['filename'])
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+                
+                # Save new file
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.root_path, 'static', 'podcasts', filename)
+                file.save(file_path)
+                
+                # Update duration
+                try:
+                    audio = MP3(file_path)
+                    update_data['duration'] = int(audio.info.length)
+                except Exception as e:
+                    logging.error(f"Error getting audio duration: {str(e)}")
+                
+                update_data['filename'] = filename
+        
+        # Update in MongoDB
+        db.podcasts.update_one(
+            {'_id': ObjectId(podcast_id)},
+            {'$set': update_data}
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Podcast updated successfully',
+            'podcast': {**podcast, **update_data, '_id': str(podcast['_id'])}
+        })
+        
+    except Exception as e:
+        logging.error(f"Error updating podcast: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 def calculate_score(user_answers, correct_answers):
     """Calculate the percentage score for a quiz"""
     if len(user_answers) != len(correct_answers):
@@ -708,6 +1322,129 @@ def calculate_score(user_answers, correct_answers):
     
     correct_count = sum(1 for user_ans, correct_ans in zip(user_answers, correct_answers) if user_ans == correct_ans)
     return (correct_count / len(correct_answers)) * 100
+
+def fetch_sports_podcasts():
+    """Fetch sports and anti-doping related podcasts from multiple sources"""
+    all_podcasts = []
+    
+    # List of RSS feeds for sports and anti-doping content
+    rss_feeds = [
+        {
+            'url': 'https://feeds.megaphone.fm/EMPOW3391357123',  # Sports Integrity Podcast
+            'category': 'Sports Integrity'
+        },
+        {
+            'url': 'https://anchor.fm/s/1f8af31c/podcast/rss',  # Play True Podcast
+            'category': 'Anti-Doping'
+        },
+        {
+            'url': 'https://feeds.buzzsprout.com/1052198.rss',  # Clean Sport Collective
+            'category': 'Clean Sport'
+        },
+        {
+            'url': 'https://feeds.soundcloud.com/users/soundcloud:users:307223250/sounds.rss',  # UKAD Podcast
+            'category': 'Anti-Doping'
+        },
+        {
+            'url': 'https://www.listennotes.com/c/r/37a1c7f7e0e246d8a8696a95c7c93d62',  # The Doping Podcast
+            'category': 'Anti-Doping Education'
+        }
+    ]
+    
+    # YouTube channels and playlists for anti-doping content
+    youtube_sources = [
+        'https://www.youtube.com/user/wadamovies/videos',  # WADA's YouTube channel
+        'https://www.youtube.com/user/cleansport/videos',  # Clean Sport
+        'https://www.youtube.com/c/antidoping/videos'  # Anti-Doping Channel
+    ]
+    
+    try:
+        # Fetch from RSS feeds
+        for feed_info in rss_feeds:
+            try:
+                feed = feedparser.parse(feed_info['url'])
+                for entry in feed.entries[:5]:  # Get latest 5 episodes
+                    try:
+                        # Extract audio URL from enclosures or content
+                        audio_url = ''
+                        if hasattr(entry, 'enclosures') and entry.enclosures:
+                            audio_url = next((e['href'] for e in entry.enclosures 
+                                            if e.get('type', '').startswith('audio/')), '')
+                        
+                        # Get the largest image from media content or thumbnail
+                        image_url = ''
+                        if hasattr(entry, 'media_content'):
+                            images = [m['url'] for m in entry.media_content 
+                                    if m.get('type', '').startswith('image/')]
+                            if images:
+                                image_url = max(images, key=lambda x: int(x.get('width', 0)))
+                        elif hasattr(entry, 'media_thumbnail'):
+                            image_url = entry.media_thumbnail[0]['url']
+                        
+                        podcast = {
+                            'title': entry.get('title', 'Untitled Episode'),
+                            'description': BeautifulSoup(entry.get('description', ''), 'html.parser').get_text()[:500],
+                            'published_date': entry.get('published', ''),
+                            'duration': entry.get('itunes_duration', ''),
+                            'audio_url': audio_url,
+                            'image_url': image_url,
+                            'source_url': entry.get('link', ''),
+                            'author': entry.get('author', feed.feed.get('title', 'Unknown')),
+                            'category': feed_info['category'],
+                            'language': entry.get('language', 'en'),
+                            'source_type': 'rss'
+                        }
+                        all_podcasts.append(podcast)
+                        logging.info(f"Added podcast: {podcast['title']} from {feed_info['url']}")
+                    except Exception as entry_error:
+                        logging.error(f"Error processing entry from {feed_info['url']}: {str(entry_error)}")
+                        continue
+            except Exception as feed_error:
+                logging.error(f"Error fetching feed {feed_info['url']}: {str(feed_error)}")
+                continue
+        
+        # Fetch from YouTube (if API key is available)
+        youtube_api_key = os.getenv('YOUTUBE_API_KEY')
+        if youtube_api_key:
+            for source in youtube_sources:
+                try:
+                    channel_id = source.split('/')[-2]
+                    url = f"https://www.googleapis.com/youtube/v3/search"
+                    params = {
+                        'key': youtube_api_key,
+                        'channelId': channel_id,
+                        'part': 'snippet',
+                        'order': 'date',
+                        'maxResults': 5,
+                        'type': 'video'
+                    }
+                    response = requests.get(url, params=params)
+                    if response.status_code == 200:
+                        data = response.json()
+                        for item in data.get('items', []):
+                            video = {
+                                'title': item['snippet']['title'],
+                                'description': item['snippet']['description'][:500],
+                                'published_date': item['snippet']['publishedAt'],
+                                'image_url': item['snippet']['thumbnails']['high']['url'],
+                                'source_url': f"https://www.youtube.com/watch?v={item['id']['videoId']}",
+                                'author': item['snippet']['channelTitle'],
+                                'category': 'Anti-Doping Education',
+                                'language': 'en',
+                                'source_type': 'youtube'
+                            }
+                            all_podcasts.append(video)
+                except Exception as yt_error:
+                    logging.error(f"Error fetching YouTube content from {source}: {str(yt_error)}")
+                    continue
+        
+        # Sort all podcasts by published date
+        all_podcasts.sort(key=lambda x: x.get('published_date', ''), reverse=True)
+        return all_podcasts
+        
+    except Exception as e:
+        logging.error(f"Error in fetch_sports_podcasts: {str(e)}")
+        return []
 
 if __name__ == "__main__":
     app.run(debug=True)

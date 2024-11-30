@@ -3,164 +3,374 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Podcasts - Anti-Doping Education</title>
+    <title>Anti-Doping Podcasts</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <style>
         .podcast-container {
             max-width: 1200px;
-            margin: 20px auto;
-            padding: 20px;
+            margin: 0 auto;
+            padding: 100px 20px 20px 20px;
+        }
+        .podcast-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
         }
         .podcast-card {
             background: white;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            align-items: center;
-            gap: 20px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        .podcast-card:hover {
+            transform: translateY(-5px);
         }
         .podcast-image {
-            width: 120px;
-            height: 120px;
-            border-radius: 8px;
+            width: 100%;
+            height: 200px;
             object-fit: cover;
         }
         .podcast-info {
-            flex: 1;
+            padding: 20px;
         }
         .podcast-title {
             font-size: 1.2em;
+            font-weight: 600;
             margin: 0 0 10px 0;
             color: #333;
         }
         .podcast-description {
             color: #666;
-            margin-bottom: 10px;
+            font-size: 0.9em;
+            margin-bottom: 15px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
         .podcast-meta {
-            font-size: 0.9em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             color: #888;
+            font-size: 0.85em;
+        }
+        .podcast-source {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .source-icon {
+            width: 16px;
+            height: 16px;
+        }
+        .controls-container {
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .controls-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .search-input {
+            flex: 1;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            font-size: 1em;
+        }
+        .filter-select {
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            background: white;
+        }
+        .source-toggle {
+            display: flex;
+            gap: 10px;
+        }
+        .source-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 25px;
+            background: #e9ecef;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .source-btn.active {
+            background: #007bff;
+            color: white;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        .error-message {
+            color: #dc3545;
+            text-align: center;
+            padding: 20px;
         }
         .audio-player {
             width: 100%;
-            margin-top: 10px;
+            margin-top: 15px;
         }
-        .categories {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
+        .youtube-embed {
+            width: 100%;
+            margin-top: 15px;
+            aspect-ratio: 16/9;
         }
-        .category-btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 20px;
-            background: #f0f0f0;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        .category-btn:hover {
-            background: #e0e0e0;
-        }
-        .category-btn.active {
-            background: #007bff;
-            color: white;
+        .spotify-embed {
+            width: 100%;
+            margin-top: 15px;
+            aspect-ratio: 16/9;
         }
     </style>
 </head>
 <body>
-    <header>
-        <h1>Anti-Doping Podcasts</h1>
-    </header>
-
-    <nav class="menu">
-        <a href="/"><i class="fas fa-home"></i> Home</a>
-        <a href="/antidopingwiki"><i class="fas fa-book-reader"></i> Anti-Doping Wiki</a>
-        <a href="/podcasts" class="active"><i class="fas fa-podcast"></i> Podcasts</a>
-        <a href="/digitaltwin"><i class="fas fa-user-circle"></i> Digital Twin</a>
-        <a href="/caloriescalculator"><i class="fas fa-calculator"></i> Calories</a>
-        <a href="/smartlabels"><i class="fas fa-qrcode"></i> Smart Labels</a>
-        <a href="/ai_coach"><i class="fas fa-robot"></i> AI Coach</a>
-        <a href="/games"><i class="fas fa-gamepad"></i> Games</a>
-    </nav>
-
     <div class="podcast-container">
-        <div class="categories">
-            <button class="category-btn active">All</button>
-            <button class="category-btn">Anti-Doping Rules</button>
-            <button class="category-btn">Athlete Stories</button>
-            <button class="category-btn">Education</button>
-            <button class="category-btn">News & Updates</button>
-        </div>
-
-        <div class="podcast-card">
-            <img src="https://via.placeholder.com/120" alt="Podcast thumbnail" class="podcast-image">
-            <div class="podcast-info">
-                <h3 class="podcast-title">Understanding Anti-Doping Rules</h3>
-                <p class="podcast-description">A comprehensive guide to anti-doping regulations and their importance in sports.</p>
-                <div class="podcast-meta">
-                    <span><i class="fas fa-clock"></i> 45 minutes</span>
-                    <span><i class="fas fa-calendar"></i> Jan 15, 2024</span>
+        <div class="controls-container">
+            <div class="controls-row">
+                <div class="source-toggle">
+                    <button class="source-btn active" data-source="all">All Sources</button>
+                    <button class="source-btn" data-source="local">Local</button>
+                    <button class="source-btn" data-source="external">External</button>
                 </div>
-                <audio controls class="audio-player">
-                    <source src="#" type="audio/mpeg">
-                    Your browser does not support the audio element.
-                </audio>
+            </div>
+            <div class="controls-row">
+                <input type="text" class="search-input" placeholder="Search podcasts...">
+                <select class="filter-select category-filter">
+                    <option value="all">All Categories</option>
+                    {% for category in categories %}
+                    <option value="{{ category }}">{{ category }}</option>
+                    {% endfor %}
+                </select>
+                <select class="filter-select sort-filter">
+                    <option value="latest">Latest First</option>
+                    <option value="oldest">Oldest First</option>
+                    <option value="title">By Title</option>
+                </select>
             </div>
         </div>
 
-        <div class="podcast-card">
-            <img src="https://via.placeholder.com/120" alt="Podcast thumbnail" class="podcast-image">
-            <div class="podcast-info">
-                <h3 class="podcast-title">Athlete Stories: Clean Sport Champions</h3>
-                <p class="podcast-description">Listen to inspiring stories from athletes who compete clean and promote fair play.</p>
-                <div class="podcast-meta">
-                    <span><i class="fas fa-clock"></i> 30 minutes</span>
-                    <span><i class="fas fa-calendar"></i> Jan 10, 2024</span>
-                </div>
-                <audio controls class="audio-player">
-                    <source src="#" type="audio/mpeg">
-                    Your browser does not support the audio element.
-                </audio>
-            </div>
+        <div class="podcast-grid" id="podcastGrid">
+            <!-- Podcasts will be loaded here -->
         </div>
 
-        <div class="podcast-card">
-            <img src="https://via.placeholder.com/120" alt="Podcast thumbnail" class="podcast-image">
-            <div class="podcast-info">
-                <h3 class="podcast-title">Latest Updates in Anti-Doping</h3>
-                <p class="podcast-description">Stay informed about the latest developments and changes in anti-doping policies.</p>
-                <div class="podcast-meta">
-                    <span><i class="fas fa-clock"></i> 35 minutes</span>
-                    <span><i class="fas fa-calendar"></i> Jan 5, 2024</span>
-                </div>
-                <audio controls class="audio-player">
-                    <source src="#" type="audio/mpeg">
-                    Your browser does not support the audio element.
-                </audio>
-            </div>
+        <div id="loading" class="loading" style="display: none;">
+            <i class="fas fa-spinner fa-spin"></i> Loading podcasts...
         </div>
+
+        <div id="error" class="error-message" style="display: none;"></div>
     </div>
 
-    <footer>
-        <p>&copy; 2024 Anti-Doping Education Platform. All rights reserved.</p>
-    </footer>
-
     <script>
-        // Add click handlers for category buttons
-        document.querySelectorAll('.category-btn').forEach(button => {
-            button.addEventListener('click', () => {
-                // Remove active class from all buttons
-                document.querySelectorAll('.category-btn').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                // Add active class to clicked button
-                button.classList.add('active');
-                // In a real application, this would filter the podcasts
+        let allPodcasts = [];
+        let searchQuery = '';
+        let currentCategory = 'all';
+        let currentSource = 'all';
+        let currentSort = 'latest';
+
+        // Load all podcasts (both local and external)
+        async function loadAllPodcasts() {
+            showLoading();
+            try {
+                const response = await fetch('/api/podcasts');
+                const data = await response.json();
+                
+                if (data.success) {
+                    allPodcasts = data.data || [];
+                    filterAndDisplayPodcasts();
+                } else {
+                    showError(data.error || 'Error loading podcasts');
+                }
+            } catch (error) {
+                showError('Error loading podcasts. Please try again later.');
+                console.error('Error:', error);
+            }
+            hideLoading();
+        }
+
+        function filterAndDisplayPodcasts() {
+            let filtered = allPodcasts;
+
+            // Filter by source
+            if (currentSource !== 'all') {
+                filtered = filtered.filter(p => p.source_type === currentSource);
+            }
+
+            // Filter by category
+            if (currentCategory !== 'all') {
+                filtered = filtered.filter(p => p.category === currentCategory);
+            }
+
+            // Filter by search
+            if (searchQuery) {
+                const query = searchQuery.toLowerCase();
+                filtered = filtered.filter(p => 
+                    p.title.toLowerCase().includes(query) ||
+                    p.description.toLowerCase().includes(query) ||
+                    p.author.toLowerCase().includes(query)
+                );
+            }
+
+            // Sort podcasts
+            filtered.sort((a, b) => {
+                switch (currentSort) {
+                    case 'latest':
+                        return new Date(b.published_date) - new Date(a.published_date);
+                    case 'oldest':
+                        return new Date(a.published_date) - new Date(b.published_date);
+                    case 'title':
+                        return a.title.localeCompare(b.title);
+                    default:
+                        return 0;
+                }
             });
+
+            displayPodcasts(filtered);
+        }
+
+        function displayPodcasts(podcasts) {
+            const grid = document.getElementById('podcastGrid');
+            if (!grid) {
+                console.error('Podcast grid element not found');
+                return;
+            }
+            
+            grid.innerHTML = '';
+
+            if (podcasts.length === 0) {
+                grid.innerHTML = '<div class="no-results">No podcasts found matching your criteria</div>';
+                return;
+            }
+
+            podcasts.forEach(podcast => {
+                const card = document.createElement('div');
+                card.className = 'podcast-card';
+
+                const content = `
+                    <img src="${podcast.image_url || '/static/images/podcast-placeholder.jpg'}" 
+                         alt="${podcast.title}" 
+                         class="podcast-image"
+                         onerror="this.src='/static/images/podcast-placeholder.jpg'">
+                    <div class="podcast-info">
+                        <h3 class="podcast-title">${podcast.title}</h3>
+                        <p class="podcast-description">${podcast.description || 'No description available'}</p>
+                        <div class="podcast-meta">
+                            <span class="podcast-source">
+                                <i class="fas ${getSourceIcon(podcast.source_type)}"></i>
+                                ${podcast.author}
+                            </span>
+                            <span>${formatDate(podcast.published_date)}</span>
+                        </div>
+                        ${getMediaPlayer(podcast)}
+                    </div>
+                `;
+
+                card.innerHTML = content;
+                grid.appendChild(card);
+            });
+        }
+
+        function getSourceIcon(sourceType) {
+            switch (sourceType) {
+                case 'youtube':
+                    return 'fa-youtube';
+                case 'spotify':
+                    return 'fa-spotify';
+                case 'itunes':
+                    return 'fa-podcast';
+                default:
+                    return 'fa-podcast';
+            }
+        }
+
+        function getMediaPlayer(podcast) {
+            if (podcast.source_type === 'youtube' && podcast.source_url) {
+                const videoId = getYouTubeId(podcast.source_url);
+                if (videoId) {
+                    return `
+                        <div class="video-container">
+                            <iframe 
+                                width="100%" 
+                                height="200" 
+                                src="https://www.youtube.com/embed/${videoId}" 
+                                frameborder="0" 
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                allowfullscreen>
+                            </iframe>
+                        </div>`;
+                }
+            }
+            
+            if (podcast.source_url) {
+                return `<a href="${podcast.source_url}" target="_blank" class="podcast-link">Listen Now</a>`;
+            }
+            
+            return '';
+        }
+
+        function getYouTubeId(url) {
+            const match = url.match(/[?&]v=([^&]+)/);
+            return match ? match[1] : null;
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'Date not available';
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+            } catch (e) {
+                return 'Invalid date';
+            }
+        }
+
+        function showLoading() {
+            const grid = document.getElementById('podcastGrid');
+            if (grid) {
+                grid.innerHTML = '<div class="loading">Loading podcasts...</div>';
+            }
+        }
+
+        function hideLoading() {
+            // Loading message will be replaced by content
+        }
+
+        function showError(message) {
+            const grid = document.getElementById('podcastGrid');
+            if (grid) {
+                grid.innerHTML = `<div class="error">${message}</div>`;
+            }
+        }
+
+        // Event Listeners
+        document.querySelector('.search-input')?.addEventListener('input', (e) => {
+            searchQuery = e.target.value;
+            filterAndDisplayPodcasts();
         });
+
+        document.querySelector('.category-filter')?.addEventListener('change', (e) => {
+            currentCategory = e.target.value;
+            filterAndDisplayPodcasts();
+        });
+
+        document.querySelector('.sort-filter')?.addEventListener('change', (e) => {
+            currentSort = e.target.value;
+            filterAndDisplayPodcasts();
+        });
+
+        // Load podcasts when page loads
+        document.addEventListener('DOMContentLoaded', loadAllPodcasts);
     </script>
 </body>
 </html>

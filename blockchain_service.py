@@ -5,38 +5,58 @@ from datetime import datetime
 from eth_account import Account
 from typing import Optional
 import time
+from dotenv import load_dotenv
 
 class BlockchainService:
     def __init__(self):
-        # Connect to local blockchain (Ganache)
-        self.w3 = Web3(Web3.HTTPProvider('http://127.0.0.1:7545'))
-        if not self.w3.is_connected():
-            raise Exception("Failed to connect to Ethereum network")
-        
-        # Load contract ABI and address
-        contract_path = os.path.join('blockchain', 'build', 'contracts', 'AntidopingCertificate.json')
-        with open(contract_path) as f:
-            contract_json = json.load(f)
-            self.contract_abi = contract_json['abi']
-            networks = contract_json.get('networks', {})
-            if not networks:
-                raise ValueError("No deployed networks found in contract JSON")
-            network_id = list(networks.keys())[-1]
-            self.contract_address = networks[network_id]['address']
-        
-        print(f"Contract address from deployment: {self.contract_address}")
-        
-        # Initialize contract
-        self.contract = self.w3.eth.contract(
-            address=self.w3.to_checksum_address(self.contract_address),
-            abi=self.contract_abi
-        )
-        
-        # Set up account with private key
-        private_key = '0x54cd5a0f68b87c1c828e2a872dc1f0e199ae902cf93f30948bda55bf5e5dd24c'
-        self.account = Account.from_key(private_key)
-        self.w3.eth.default_account = self.account.address
-        print(f"Initialized with account: {self.account.address}")
+        try:
+            # Load environment variables
+            load_dotenv()
+            
+            # Get blockchain configuration from environment variables
+            self.network_url = os.getenv('BLOCKCHAIN_NETWORK_URL', 'http://127.0.0.1:7545')
+            self.private_key = os.getenv('BLOCKCHAIN_PRIVATE_KEY', '0x54cd5a0f68b87c1c828e2a872dc1f0e199ae902cf93f30948bda55bf5e5dd24c')
+            self.contract_address = os.getenv('BLOCKCHAIN_CONTRACT_ADDRESS')
+            
+            # Connect to blockchain network
+            self.w3 = Web3(Web3.HTTPProvider(self.network_url))
+            if not self.w3.is_connected():
+                raise Exception(f"Failed to connect to Ethereum network at {self.network_url}")
+            
+            # Load contract ABI and address
+            contract_path = os.path.join(os.path.dirname(__file__), 'blockchain', 'build', 'contracts', 'AntidopingCertificate.json')
+            if not os.path.exists(contract_path):
+                raise Exception(f"Contract file not found at {contract_path}")
+                
+            with open(contract_path) as f:
+                contract_json = json.load(f)
+                self.contract_abi = contract_json['abi']
+                
+                # Use contract address from environment if available, otherwise from deployment
+                if not self.contract_address:
+                    networks = contract_json.get('networks', {})
+                    if not networks:
+                        raise ValueError("No deployed networks found in contract JSON")
+                    network_id = list(networks.keys())[-1]
+                    self.contract_address = networks[network_id]['address']
+            
+            print(f"Contract address: {self.contract_address}")
+            
+            # Initialize contract
+            self.contract = self.w3.eth.contract(
+                address=self.w3.to_checksum_address(self.contract_address),
+                abi=self.contract_abi
+            )
+            
+            # Set up account with private key
+            self.account = Account.from_key(self.private_key)
+            self.w3.eth.default_account = self.account.address
+            
+            print(f"Blockchain service initialized with account: {self.account.address}")
+            
+        except Exception as e:
+            print(f"Error initializing blockchain service: {str(e)}")
+            raise
 
     def mint_certificate(self, recipient_address: str, quiz_title: str, score: int, ipfs_hash: Optional[str] = None) -> str:
         max_retries = 3
@@ -55,14 +75,22 @@ class BlockchainService:
                 # Get optimized gas price (10% higher than base for faster confirmation)
                 gas_price = int(self.w3.eth.gas_price * 1.1)
                 
+                print(f"Gas Price: {gas_price}")
+                print(f"Sender Account: {self.account.address}")
+                
                 # Estimate gas with the actual parameters
-                estimated_gas = self.contract.functions.mintCertificate(
-                    recipient_address,
-                    quiz_title,
-                    score,
-                    date,
-                    ipfs_hash
-                ).estimate_gas({'from': self.account.address})
+                try:
+                    estimated_gas = self.contract.functions.mintCertificate(
+                        recipient_address,
+                        quiz_title,
+                        score,
+                        date,
+                        ipfs_hash
+                    ).estimate_gas({'from': self.account.address})
+                    print(f"Estimated Gas: {estimated_gas}")
+                except Exception as e:
+                    print(f"Error estimating gas: {str(e)}")
+                    raise
                 
                 # Add 20% buffer to estimated gas
                 gas_limit = int(estimated_gas * 1.2)
@@ -84,7 +112,7 @@ class BlockchainService:
                 print(f"Transaction built with gas limit: {gas_limit}")
                 
                 # Sign and send transaction
-                signed_tx = self.w3.eth.account.sign_transaction(tx, private_key=self.account.key)
+                signed_tx = self.w3.eth.account.sign_transaction(tx, private_key=self.private_key)
                 tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
                 print(f"Transaction sent with hash: {self.w3.to_hex(tx_hash)}")
                 
@@ -106,7 +134,7 @@ class BlockchainService:
             except Exception as e:
                 if attempt < max_retries - 1:
                     print(f"\nAttempt {attempt + 1} failed: {str(e)}")
-                    print("Retrying in {retry_delay} seconds...")
+                    print(f"Retrying in {retry_delay} seconds...")
                     time.sleep(retry_delay)
                     continue
                 print(f"\nAll attempts failed. Last error: {str(e)}")
@@ -116,7 +144,7 @@ class BlockchainService:
         try:
             # Get certificate data
             certificate = self.get_certificate(token_id)
-            if not certificate['success']:
+            if not certificate:
                 return {
                     'success': False,
                     'error': 'Certificate not found'
@@ -156,7 +184,7 @@ class BlockchainService:
                 'is_valid': True,
                 'owner': owner,
                 'matches_recipient': not expected_recipient or owner.lower() == expected_recipient.lower(),
-                'data': certificate['data'],
+                'data': certificate,
                 'token_uri': token_uri,
                 'history': transfers_with_time
             }
@@ -166,24 +194,28 @@ class BlockchainService:
                 'error': str(e)
             }
 
-    def get_certificate(self, token_id: int) -> dict:
+    def get_certificate(self, token_id: str) -> Optional[dict]:
+        """Get certificate data from the blockchain"""
         try:
+            # Convert token_id to int if it's a string
+            token_id = int(token_id) if isinstance(token_id, str) else token_id
+            
+            # Get certificate data from contract
             certificate = self.contract.functions.getCertificate(token_id).call()
+            
+            # Return formatted certificate data
             return {
-                'success': True,
-                'data': {
-                    'quiz_title': certificate[0],
-                    'score': certificate[1],
-                    'date': certificate[2],
-                    'recipient': certificate[3],
-                    'ipfs_hash': certificate[4]
-                }
+                'recipient': certificate[0],
+                'quiz_title': certificate[1],
+                'score': certificate[2],
+                'date': certificate[3],
+                'ipfs_hash': certificate[4],
+                'timestamp': certificate[5],
+                'is_revoked': certificate[6]
             }
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            print(f"Error getting certificate {token_id}: {str(e)}")
+            return None
 
     def get_user_certificates(self, user_address: str) -> dict:
         try:
@@ -195,13 +227,13 @@ class BlockchainService:
             
             for token_id in token_ids:
                 cert_data = self.get_certificate(token_id)
-                if cert_data['success']:
+                if cert_data:
                     # Get verification details
                     verification = self.verify_certificate(token_id)
                     certificates.append({
                         'token_id': token_id,
                         'verification': verification,
-                        **cert_data['data']
+                        **cert_data
                     })
             
             return {
