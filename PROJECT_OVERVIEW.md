@@ -29,6 +29,37 @@ Our team has developed an innovative anti-doping educational platform that combi
 - Personalized learning paths
 - Achievement system
 
+### 4. Digital Twin Athlete Monitoring
+The Digital Twin system provides real-time athlete monitoring and health tracking:
+
+#### Technical Implementation
+- **Backend Service**: `digital_twin_service.py`
+  - Bluetooth Low Energy (BLE) device connectivity
+  - Real-time data collection and processing
+  - Anomaly detection and health monitoring
+  - Support for multiple fitness device brands
+
+#### Key Features
+- Real-time health metrics monitoring
+  - Heart rate tracking
+  - Step counting
+  - Activity duration measurement
+  - Performance analytics
+
+#### Device Support
+- Fitbit devices
+- Mi Band series
+- Garmin devices
+- Apple Watch
+- Samsung Galaxy Watch
+
+#### User Interface
+- Responsive design for all devices
+- Real-time data visualization
+- Interactive device management
+- Dark mode support
+- Animated alerts and notifications
+
 ## Technical Implementation
 
 ### Backend Architecture
@@ -118,6 +149,13 @@ pytest-cov==2.12.1
 
 # Utilities
 python-dateutil==2.8.2
+
+# Digital Twin Requirements
+bleak==0.21.1
+asyncio==3.4.3
+pandas==1.5.3
+numpy==1.24.3
+scikit-learn==1.3.0
 ```
 
 ### 4. Development Tools Configuration

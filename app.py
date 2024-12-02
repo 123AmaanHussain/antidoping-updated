@@ -949,6 +949,83 @@ def delete_nutrition_plan(plan_id):
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# Import digital twin service
+from digital_twin_service import DigitalTwin, monitor_athlete
+import asyncio
+
+# Digital Twin Routes
+@app.route('/digital-twin')
+def digital_twin_page():
+    """Render the digital twin monitoring page."""
+    return render_template('digital_twin.html')
+
+@app.route('/api/digital-twin/scan', methods=['GET'])
+async def scan_devices():
+    """Scan for available fitness devices."""
+    try:
+        digital_twin = DigitalTwin()
+        devices = await digital_twin.device_manager.scan_devices()
+        return jsonify({
+            'status': 'success',
+            'devices': devices
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/digital-twin/connect', methods=['POST'])
+async def connect_device():
+    """Connect to a specific fitness device."""
+    try:
+        data = request.get_json()
+        device_address = data.get('device_address')
+        
+        if not device_address:
+            return jsonify({
+                'status': 'error',
+                'message': 'Device address is required'
+            }), 400
+        
+        digital_twin = DigitalTwin()
+        await digital_twin.initialize(device_address)
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Connected to device'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/digital-twin/monitor', methods=['POST'])
+async def start_monitoring():
+    """Start monitoring athlete's data."""
+    try:
+        data = request.get_json()
+        duration = data.get('duration', 60)  # Default 60 seconds
+        
+        insights = await monitor_athlete(duration)
+        
+        if insights:
+            return jsonify({
+                'status': 'success',
+                'data': insights
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to collect data'
+            }), 500
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
 # AI Coach configuration
 AI_COACH_PROMPT = """You are an expert AI Sports Coach and Anti-Doping Assistant. Your role is to provide personalized guidance for athletes.
 
