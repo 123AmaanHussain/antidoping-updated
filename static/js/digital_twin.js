@@ -6,6 +6,8 @@ class DigitalTwinManager {
         this.isMonitoring = false;
         this.deviceAddress = null;
         this.scanTimeout = null;
+        this.monitoringInterval = null;
+        this.connectedDevice = null;
         this.initializeCharts();
         this.bindEvents();
     }
@@ -131,38 +133,77 @@ class DigitalTwinManager {
                 </div>
             `;
             
-            const response = await fetch('/api/digital-twin/scan');
-            const data = await response.json();
+            const response = await fetch('/digital-twin', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'scan'
+                })
+            });
             
-            if (data.status === 'success' && data.devices.length > 0) {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            console.log('Scan response:', data); // Debug log
+            
+            if (data.status === 'success' && data.devices && data.devices.length > 0) {
                 deviceList.innerHTML = '';
                 data.devices.forEach(device => {
                     const deviceElement = document.createElement('div');
                     deviceElement.className = 'device-item';
+                    
+                    // Determine device icon and type-specific styling
+                    let deviceIcon = 'bluetooth';
+                    let deviceTypeClass = '';
+                    if (device.type === 'firebolt') {
+                        deviceIcon = 'bolt';
+                        deviceTypeClass = 'text-warning';
+                    }
+                    
                     deviceElement.innerHTML = `
                         <div class="device-info">
-                            <i class="fas fa-bluetooth device-icon"></i>
+                            <i class="fas fa-${deviceIcon} device-icon ${deviceTypeClass}"></i>
                             <div>
                                 <div class="device-name">${device.name || 'Unknown Device'}</div>
-                                <div class="device-status">${device.address}</div>
+                                <div class="device-status">
+                                    Signal: ${this.getSignalStrengthLabel(device.rssi)}
+                                    ${device.battery ? ` | Battery: ${device.battery}%` : ''}
+                                </div>
                             </div>
                         </div>
-                        <button onclick="digitalTwin.connectDevice('${device.address}')" class="connect-btn">
+                        <button class="connect-btn btn btn-primary">
                             <i class="fas fa-link"></i> Connect
                         </button>
                     `;
+                    
+                    // Add click event listener to connect button
+                    const connectBtn = deviceElement.querySelector('.connect-btn');
+                    connectBtn.addEventListener('click', () => this.connectDevice(device.address));
+                    
                     deviceList.appendChild(deviceElement);
                 });
+                
+                showAlert('Devices found successfully', 'success');
             } else {
                 deviceList.innerHTML = `
                     <div class="text-center p-4">
                         <i class="fas fa-exclamation-circle fa-2x text-warning"></i>
-                        <p class="mt-2">No devices found. Make sure your device is nearby and Bluetooth is enabled.</p>
+                        <p class="mt-2">No devices found. Please ensure your device is:</p>
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-check-circle text-success"></i> Turned on</li>
+                            <li><i class="fas fa-check-circle text-success"></i> In pairing mode</li>
+                            <li><i class="fas fa-check-circle text-success"></i> Within range</li>
+                        </ul>
                         <button onclick="digitalTwin.scanDevices()" class="btn btn-primary mt-3">
                             <i class="fas fa-sync"></i> Try Again
                         </button>
                     </div>
                 `;
+                showAlert('No devices found', 'warning');
             }
         } catch (error) {
             console.error('Error scanning devices:', error);
@@ -175,7 +216,7 @@ class DigitalTwinManager {
                     </button>
                 </div>
             `;
-            showAlert('Error scanning for devices', 'error');
+            showAlert('Error scanning for devices: ' + error.message, 'error');
         } finally {
             // Reset scan button
             scanButton.disabled = false;
@@ -183,7 +224,20 @@ class DigitalTwinManager {
         }
     }
 
+    getSignalStrengthLabel(rssi) {
+        if (!rssi) return 'Unknown';
+        if (rssi >= -50) return 'Excellent';
+        if (rssi >= -60) return 'Good';
+        if (rssi >= -70) return 'Fair';
+        return 'Poor';
+    }
+
     async connectDevice(address) {
+        if (!address) {
+            showAlert('Invalid device address', 'error');
+            return;
+        }
+
         const connectBtn = event.target.closest('.connect-btn');
         const originalContent = connectBtn.innerHTML;
         
@@ -194,123 +248,148 @@ class DigitalTwinManager {
                 Connecting...
             `;
             
-            const response = await fetch('/api/digital-twin/connect', {
+            const response = await fetch('/digital-twin', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ device_address: address })
+                body: JSON.stringify({
+                    action: 'connect',
+                    device_address: address
+                })
             });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
             const data = await response.json();
+            console.log('Connect response:', data); // Debug log
             
             if (data.status === 'success') {
+                this.connectedDevice = data.device;
                 this.deviceAddress = address;
-                connectBtn.innerHTML = `<i class="fas fa-check"></i> Connected`;
-                connectBtn.classList.add('btn-success');
-                document.getElementById('startMonitoring').disabled = false;
-                showAlert('Connected to device successfully', 'success');
                 
-                // Update other connect buttons
+                // Update UI to show connected state
+                document.getElementById('startMonitoring').disabled = false;
+                connectBtn.innerHTML = `<i class="fas fa-check"></i> Connected`;
+                connectBtn.classList.remove('btn-primary');
+                connectBtn.classList.add('btn-success');
+                
+                // Disable other connect buttons
                 document.querySelectorAll('.connect-btn').forEach(btn => {
                     if (btn !== connectBtn) {
                         btn.disabled = true;
+                        btn.classList.add('btn-secondary');
                     }
                 });
+                
+                showAlert(`Connected to ${data.device.name}`, 'success');
+                
+                // Start monitoring automatically
+                await this.startMonitoring();
             } else {
-                throw new Error(data.message);
+                throw new Error(data.message || 'Failed to connect');
             }
         } catch (error) {
             console.error('Error connecting to device:', error);
             connectBtn.innerHTML = originalContent;
             connectBtn.disabled = false;
-            showAlert('Error connecting to device', 'error');
+            showAlert(error.message || 'Failed to connect to device', 'error');
         }
     }
 
-    async toggleMonitoring() {
-        const monitorBtn = document.getElementById('startMonitoring');
-        
-        if (!this.isMonitoring) {
-            try {
-                this.isMonitoring = true;
-                monitorBtn.innerHTML = `
-                    <div class="loading-spinner"></div>
-                    Monitoring...
-                `;
-                
-                const response = await fetch('/api/digital-twin/monitor', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ duration: 3600 }) // 1 hour monitoring
-                });
-                
-                const data = await response.json();
-                if (data.status === 'success') {
-                    this.updateCharts(data.data);
-                    this.updateStats(data.data.statistics);
-                    this.checkAlerts(data.data.alerts);
-                    monitorBtn.innerHTML = `<i class="fas fa-stop"></i> Stop Monitoring`;
-                    monitorBtn.classList.remove('btn-success');
-                    monitorBtn.classList.add('btn-danger');
+    async startMonitoring() {
+        if (!this.deviceAddress) {
+            showAlert('No device connected', 'error');
+            return;
+        }
+
+        try {
+            this.isMonitoring = true;
+            document.getElementById('startMonitoring').innerHTML = `
+                <i class="fas fa-stop"></i> Stop Monitoring
+            `;
+
+            // Start periodic data collection
+            this.monitoringInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/digital-twin', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: new URLSearchParams({
+                            'action': 'get_data',
+                            'duration': '60'
+                        })
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.status === 'success') {
+                        this.updateCharts(data);
+                        this.updateStats(data.statistics);
+                    } else {
+                        throw new Error(data.message);
+                    }
+                } catch (error) {
+                    console.error('Error getting monitoring data:', error);
+                    this.stopMonitoring();
+                    showAlert('Error getting monitoring data', 'error');
                 }
-            } catch (error) {
-                console.error('Error during monitoring:', error);
-                showAlert('Error during monitoring', 'error');
-                this.isMonitoring = false;
-                monitorBtn.innerHTML = `<i class="fas fa-play"></i> Start Monitoring`;
-                monitorBtn.classList.remove('btn-danger');
-                monitorBtn.classList.add('btn-success');
-            }
+            }, 1000);
+
+        } catch (error) {
+            console.error('Error starting monitoring:', error);
+            this.stopMonitoring();
+            showAlert('Error starting monitoring', 'error');
+        }
+    }
+
+    stopMonitoring() {
+        this.isMonitoring = false;
+        if (this.monitoringInterval) {
+            clearInterval(this.monitoringInterval);
+            this.monitoringInterval = null;
+        }
+        document.getElementById('startMonitoring').innerHTML = `
+            <i class="fas fa-play"></i> Start Monitoring
+        `;
+    }
+
+    async toggleMonitoring() {
+        if (this.isMonitoring) {
+            this.stopMonitoring();
         } else {
-            this.isMonitoring = false;
-            monitorBtn.innerHTML = `<i class="fas fa-play"></i> Start Monitoring`;
-            monitorBtn.classList.remove('btn-danger');
-            monitorBtn.classList.add('btn-success');
+            await this.startMonitoring();
         }
     }
 
     updateCharts(data) {
-        if (data.raw_data && data.raw_data.length > 0) {
-            const timestamps = data.raw_data.map(d => new Date(d.timestamp).toLocaleTimeString());
-            const heartRates = data.raw_data.map(d => d.heart_rate);
-            
-            this.heartRateChart.data.labels = timestamps;
-            this.heartRateChart.data.datasets[0].data = heartRates;
-            this.heartRateChart.update('none'); // Disable animation for performance
+        if (!data.data || !Array.isArray(data.data)) return;
 
-            const latestSteps = data.statistics.total_steps || 0;
-            this.stepsChart.data.datasets[0].data = [latestSteps];
-            this.stepsChart.update('none');
-        }
+        const timestamps = data.data.map(d => new Date(d.timestamp).toLocaleTimeString());
+        const heartRates = data.data.map(d => d.heart_rate);
+        const steps = data.data[data.data.length - 1].steps;
+
+        // Update heart rate chart
+        this.heartRateChart.data.labels = timestamps;
+        this.heartRateChart.data.datasets[0].data = heartRates;
+        this.heartRateChart.update();
+
+        // Update steps chart
+        this.stepsChart.data.datasets[0].data = [steps];
+        this.stepsChart.update();
     }
 
-    updateStats(statistics) {
-        if (statistics) {
-            document.getElementById('avgHeartRate').textContent = 
-                Math.round(statistics.avg_heart_rate) || '--';
-            document.getElementById('maxHeartRate').textContent = 
-                Math.round(statistics.max_heart_rate) || '--';
-            document.getElementById('totalSteps').textContent = 
-                statistics.total_steps?.toLocaleString() || '--';
-            document.getElementById('activityDuration').textContent = 
-                Math.round(statistics.activity_duration) || '--';
-        }
-    }
+    updateStats(stats) {
+        if (!stats) return;
 
-    checkAlerts(alerts) {
-        if (alerts && alerts.length > 0) {
-            alerts.forEach(alert => {
-                let icon = 'info-circle';
-                if (alert.type === 'anomaly') icon = 'exclamation-triangle';
-                
-                showAlert(`
-                    <i class="fas fa-${icon}"></i>
-                    ${alert.message}
-                `, 'warning');
-            });
-        }
+        document.getElementById('avgHeartRate').textContent = Math.round(stats.avg_heart_rate);
+        document.getElementById('maxHeartRate').textContent = Math.round(stats.max_heart_rate);
+        document.getElementById('totalSteps').textContent = stats.total_steps;
+        document.getElementById('activityDuration').textContent = Math.round(stats.duration / 60);
     }
 }
 
@@ -321,18 +400,26 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Utility function to show alerts
-function showAlert(message, type) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type}`;
-    alertDiv.innerHTML = message;
-    
+function showAlert(message, type = 'info') {
     const alertsContainer = document.getElementById('alerts');
-    alertsContainer.appendChild(alertDiv);
+    const alert = document.createElement('div');
+    alert.className = `alert alert-${type}`;
     
-    // Add slide-out animation before removing
+    let icon = 'info-circle';
+    if (type === 'success') icon = 'check-circle';
+    if (type === 'error') icon = 'exclamation-circle';
+    if (type === 'warning') icon = 'exclamation-triangle';
+    
+    alert.innerHTML = `
+        <i class="fas fa-${icon}"></i>
+        <span>${message}</span>
+    `;
+    
+    alertsContainer.appendChild(alert);
+    
+    // Remove alert after 5 seconds
     setTimeout(() => {
-        alertDiv.style.transform = 'translateX(100%)';
-        alertDiv.style.opacity = '0';
-        setTimeout(() => alertDiv.remove(), 300);
-    }, 4700);
+        alert.style.opacity = '0';
+        setTimeout(() => alert.remove(), 300);
+    }, 5000);
 }

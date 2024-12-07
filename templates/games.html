@@ -257,6 +257,11 @@
             const userId = document.getElementById('user-id').value;
             const userEmail = document.getElementById('user-email').value;
 
+            if (!userId) {
+                showError('Please enter your User ID');
+                return;
+            }
+
             try {
                 const response = await fetch('/submit_quiz', {
                     method: 'POST',
@@ -272,13 +277,17 @@
                 });
 
                 const result = await response.json();
+                console.log('Quiz submission result:', result);
 
                 if (result.success) {
+                    // Store user ID in result for certificate download
+                    result.user_id = userId;
                     showResult(result);
                 } else {
                     showError(result.error || 'Failed to submit quiz');
                 }
             } catch (error) {
+                console.error('Quiz submission error:', error);
                 showError('Error submitting quiz: ' + error.message);
             }
         }
@@ -291,12 +300,16 @@
             resultContainer.style.display = 'block';
 
             let certificateHtml = '';
-            if (result.certificate) {
+            if (result.certificate && result.score >= 70) {
+                console.log('Certificate data:', result.certificate);
+                // Use the stored user ID if certificate.user_id is undefined
+                const certificateUserId = result.certificate.user_id || result.user_id;
+                
                 certificateHtml = `
                     <div class="mt-4">
-                        <h4>🎉 Congratulations! You've earned your certificates!</h4>
+                        <h4>🎉 Congratulations! You've earned your certificate!</h4>
                         <div class="d-flex justify-content-center gap-3 mt-3">
-                            <a href="/download_certificate/${result.certificate.pdf_path}" 
+                            <a href="/download_certificate/${certificateUserId}/${result.certificate.pdf_path}" 
                                class="btn btn-success" target="_blank">
                                 <i class="fas fa-download me-2"></i>Download PDF Certificate
                             </a>

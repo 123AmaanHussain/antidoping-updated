@@ -4,13 +4,16 @@ import json
 from datetime import datetime, timedelta
 
 class MockBluetoothDevice:
-    def __init__(self, name="Test Fitness Band", address="00:11:22:33:44:55"):
+    def __init__(self, name="Test Fitness Band", address="00:11:22:33:44:55", device_type="generic"):
         self.name = name
         self.address = address
+        self.device_type = device_type
         self.heart_rate = 70
         self.steps = 0
         self.is_connected = False
         self.start_time = None
+        self.battery_level = 100
+        self.last_sync = datetime.now()
 
     def simulate_heart_rate(self):
         """Simulate realistic heart rate changes."""
@@ -27,86 +30,119 @@ class MockBluetoothDevice:
     def get_data(self):
         """Get current device data."""
         return {
+            'device_name': self.name,
+            'device_type': self.device_type,
             'heart_rate': round(self.simulate_heart_rate()),
             'steps': self.simulate_steps(),
-            'timestamp': datetime.now().isoformat()
+            'battery_level': self.battery_level,
+            'last_sync': self.last_sync.isoformat(),
+            'timestamp': datetime.now().isoformat(),
+            'connection_status': 'Connected' if self.is_connected else 'Disconnected'
         }
 
 class TestDeviceSimulator:
     def __init__(self):
         self.devices = [
-            MockBluetoothDevice("Mi Band 6", "12:34:56:78:90:AB"),
-            MockBluetoothDevice("Fitbit Charge 5", "AB:CD:EF:12:34:56"),
-            MockBluetoothDevice("Apple Watch", "98:76:54:32:10:EF")
+            MockBluetoothDevice("Firebolt Fitness Tracker", "FB:12:34:56:78:90", "firebolt"),
+            MockBluetoothDevice("Mi Band 6", "12:34:56:78:90:AB", "mi_band"),
+            MockBluetoothDevice("Fitbit Charge 5", "AB:CD:EF:12:34:56", "fitbit"),
+            MockBluetoothDevice("Apple Watch", "98:76:54:32:10:EF", "apple")
         ]
         self.connected_device = None
+        self.scanning = False
 
     async def scan_devices(self):
         """Simulate device scanning."""
-        await asyncio.sleep(2)  # Simulate scanning delay
-        return [{"name": d.name, "address": d.address} for d in self.devices]
+        if self.scanning:
+            return {"status": "error", "message": "Scan already in progress"}
+        
+        try:
+            self.scanning = True
+            await asyncio.sleep(2)  # Simulate scanning delay
+            
+            # Add some randomization to make scanning more realistic
+            available_devices = []
+            for device in self.devices:
+                if random.random() > 0.1:  # 90% chance device is discoverable
+                    available_devices.append({
+                        "name": device.name,
+                        "address": device.address,
+                        "type": device.device_type,
+                        "rssi": random.randint(-90, -40),  # Simulate signal strength
+                        "battery": device.battery_level
+                    })
+            
+            return {"status": "success", "devices": available_devices}
+        
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+        finally:
+            self.scanning = False
 
     async def connect_device(self, address):
         """Simulate connecting to a device."""
-        await asyncio.sleep(1)  # Simulate connection delay
-        
-        device = next((d for d in self.devices if d.address == address), None)
-        if device:
-            device.is_connected = True
-            device.start_time = datetime.now()
-            self.connected_device = device
-            return True
-        return False
+        try:
+            # Find the device with matching address
+            device = next((d for d in self.devices if d.address == address), None)
+            
+            if not device:
+                return {"status": "error", "message": "Device not found"}
+
+            await asyncio.sleep(1)  # Simulate connection delay
+            
+            # Simulate connection success rate
+            if random.random() > 0.1:  # 90% success rate
+                device.is_connected = True
+                device.last_sync = datetime.now()
+                self.connected_device = device
+                
+                return {
+                    "status": "success",
+                    "device": {
+                        "name": device.name,
+                        "address": device.address,
+                        "type": device.device_type,
+                        "battery": device.battery_level,
+                        "last_sync": device.last_sync.isoformat()
+                    }
+                }
+            else:
+                return {"status": "error", "message": "Failed to connect. Please try again."}
+                
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     async def get_monitoring_data(self, duration_seconds=60):
-        """Simulate monitoring data collection."""
+        """Get monitoring data from the connected device."""
         if not self.connected_device:
-            return None
-
-        data_points = []
-        current_time = self.connected_device.start_time or datetime.now()
-        
-        # Generate data points
-        for i in range(duration_seconds):
-            data_point = self.connected_device.get_data()
-            data_points.append(data_point)
-            current_time += timedelta(seconds=1)
-            await asyncio.sleep(0.1)  # Simulate data collection delay
-
-        # Calculate statistics
-        heart_rates = [d['heart_rate'] for d in data_points]
-        steps = max([d['steps'] for d in data_points])
-        
-        return {
-            'status': 'success',
-            'data': {
-                'raw_data': data_points,
-                'statistics': {
-                    'avg_heart_rate': sum(heart_rates) / len(heart_rates),
-                    'max_heart_rate': max(heart_rates),
-                    'total_steps': steps,
-                    'activity_duration': duration_seconds / 60  # in minutes
-                },
-                'alerts': self._generate_alerts(heart_rates)
+            return {"status": "error", "message": "No device connected"}
+            
+        try:
+            data_points = []
+            start_time = datetime.now()
+            
+            # Simulate collecting data points
+            while (datetime.now() - start_time).seconds < duration_seconds:
+                data_points.append(self.connected_device.get_data())
+                await asyncio.sleep(1)  # Collect data every second
+                
+            return {
+                "status": "success",
+                "device_name": self.connected_device.name,
+                "data": data_points
             }
-        }
+            
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
-    def _generate_alerts(self, heart_rates):
-        """Generate alerts based on heart rate data."""
-        alerts = []
-        avg_hr = sum(heart_rates) / len(heart_rates)
-        hr_std = (sum((x - avg_hr) ** 2 for x in heart_rates) / len(heart_rates)) ** 0.5
-
-        for hr in heart_rates:
-            if abs(hr - avg_hr) > 2 * hr_std:
-                alerts.append({
-                    'type': 'anomaly',
-                    'message': f'Unusual heart rate detected: {hr} BPM',
-                    'value': hr,
-                    'timestamp': datetime.now().isoformat()
-                })
-
-        return alerts
+    async def disconnect_device(self):
+        """Disconnect from the current device."""
+        if self.connected_device:
+            await asyncio.sleep(0.5)  # Simulate disconnection delay
+            self.connected_device.is_connected = False
+            self.connected_device = None
+            return {"status": "success", "message": "Device disconnected"}
+        return {"status": "error", "message": "No device connected"}
 
 # Global simulator instance
 simulator = TestDeviceSimulator()

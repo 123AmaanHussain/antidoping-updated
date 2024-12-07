@@ -256,63 +256,161 @@
 
 {% block content %}
 <div class="digital-twin-container">
-    <h1>Digital Twin - Real-time Athlete Monitoring</h1>
+    <h2 class="mb-4">Athlete Digital Twin Dashboard</h2>
     
-    <div id="alerts" class="alerts-container"></div>
-    
-    <div class="device-controls">
-        <h2>Device Management</h2>
-        <div class="button-group">
-            <button id="scanDevices" class="btn btn-primary">
-                <i class="fas fa-search"></i> Scan for Devices
-            </button>
-            <button id="startMonitoring" class="btn btn-success" disabled>
-                <i class="fas fa-play"></i> Start Monitoring
-            </button>
-        </div>
-        <div id="deviceList" class="device-list mt-3">
-            <div class="text-center">
-                <i class="fas fa-bluetooth fa-2x text-primary"></i>
-                <p>Click 'Scan for Devices' to begin</p>
-            </div>
-        </div>
-    </div>
-
+    <!-- Real-time Stats -->
     <div class="stats-container">
         <div class="stat-card">
-            <i class="fas fa-heartbeat fa-2x text-danger"></i>
-            <div class="stat-value" id="avgHeartRate">--</div>
-            <div class="stat-label">Average Heart Rate</div>
+            <i class="fas fa-heartbeat"></i>
+            <div class="stat-value" id="heart-rate">--</div>
+            <div class="stat-label">Heart Rate (BPM)</div>
         </div>
         <div class="stat-card">
-            <i class="fas fa-heart fa-2x text-danger"></i>
-            <div class="stat-value" id="maxHeartRate">--</div>
-            <div class="stat-label">Max Heart Rate</div>
+            <i class="fas fa-walking"></i>
+            <div class="stat-value" id="steps">--</div>
+            <div class="stat-label">Steps</div>
         </div>
         <div class="stat-card">
-            <i class="fas fa-walking fa-2x text-success"></i>
-            <div class="stat-value" id="totalSteps">--</div>
-            <div class="stat-label">Total Steps</div>
+            <i class="fas fa-bed"></i>
+            <div class="stat-value" id="sleep">--</div>
+            <div class="stat-label">Sleep Hours</div>
         </div>
         <div class="stat-card">
-            <i class="fas fa-clock fa-2x text-primary"></i>
-            <div class="stat-value" id="activityDuration">--</div>
-            <div class="stat-label">Activity Duration (min)</div>
+            <i class="fas fa-fire"></i>
+            <div class="stat-value" id="calories">--</div>
+            <div class="stat-label">Calories Burned</div>
         </div>
     </div>
 
-    <div class="charts-container">
-        <div class="chart-box">
-            <canvas id="heartRateChart"></canvas>
+    <!-- Additional Metrics -->
+    <div class="stats-container">
+        <div class="stat-card">
+            <i class="fas fa-chart-line"></i>
+            <div class="stat-value" id="hrv">--</div>
+            <div class="stat-label">HRV</div>
         </div>
-        <div class="chart-box">
-            <canvas id="stepsChart"></canvas>
+        <div class="stat-card">
+            <i class="fas fa-running"></i>
+            <div class="stat-value" id="activity">--</div>
+            <div class="stat-label">Current Activity</div>
         </div>
+        <div class="stat-card">
+            <i class="fas fa-tint"></i>
+            <div class="stat-value" id="hydration">--</div>
+            <div class="stat-label">Hydration Level</div>
+        </div>
+        <div class="stat-card">
+            <i class="fas fa-battery-three-quarters"></i>
+            <div class="stat-value" id="recovery">--</div>
+            <div class="stat-label">Recovery Score</div>
+        </div>
+    </div>
+
+    <!-- Risk Alerts -->
+    <div class="alerts-container" id="risk-alerts">
+        <!-- Alerts will be dynamically added here -->
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<!-- Socket.IO and Chart.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="{{ url_for('static', filename='js/digital_twin.js') }}"></script>
+
+<script>
+    // Initialize Socket.IO
+    const socket = io();
+    const athleteId = "{{ athlete_id }}";
+
+    // Start simulation when page loads
+    fetch(`/api/athlete/start_simulation/${athleteId}`, {
+        method: 'POST'
+    });
+
+    // Listen for real-time updates
+    socket.on('athlete_update', function(data) {
+        if (data.athlete_id === athleteId) {
+            updateDashboard(data.data);
+            checkRisks(data.data.risks);
+        }
+    });
+
+    function updateDashboard(data) {
+        // Update stats
+        document.getElementById('heart-rate').textContent = data.heart_rate;
+        document.getElementById('steps').textContent = data.steps.toLocaleString();
+        document.getElementById('sleep').textContent = data.sleep_hours;
+        document.getElementById('calories').textContent = Math.round(data.calories_burned).toLocaleString();
+        document.getElementById('hrv').textContent = Math.round(data.hrv);
+        document.getElementById('activity').textContent = data.activity.charAt(0).toUpperCase() + data.activity.slice(1);
+        document.getElementById('hydration').textContent = Math.round(data.hydration_level) + '%';
+        document.getElementById('recovery').textContent = Math.round(data.recovery_score);
+
+        // Update card colors based on values
+        updateCardColors(data);
+    }
+
+    function updateCardColors(data) {
+        // Heart Rate
+        const hrCard = document.getElementById('heart-rate').parentElement;
+        if (data.heart_rate > 160) {
+            hrCard.style.backgroundColor = '#ffe6e6';
+        } else if (data.heart_rate > 120) {
+            hrCard.style.backgroundColor = '#fff3e6';
+        } else {
+            hrCard.style.backgroundColor = '#fff';
+        }
+
+        // Recovery Score
+        const recoveryCard = document.getElementById('recovery').parentElement;
+        if (data.recovery_score < 50) {
+            recoveryCard.style.backgroundColor = '#ffe6e6';
+        } else if (data.recovery_score < 70) {
+            recoveryCard.style.backgroundColor = '#fff3e6';
+        } else {
+            recoveryCard.style.backgroundColor = '#fff';
+        }
+
+        // Hydration Level
+        const hydrationCard = document.getElementById('hydration').parentElement;
+        if (data.hydration_level < 50) {
+            hydrationCard.style.backgroundColor = '#ffe6e6';
+        } else if (data.hydration_level < 70) {
+            hydrationCard.style.backgroundColor = '#fff3e6';
+        } else {
+            hydrationCard.style.backgroundColor = '#fff';
+        }
+    }
+
+    function checkRisks(risks) {
+        const alertsContainer = document.getElementById('risk-alerts');
+        
+        risks.forEach(risk => {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${risk.level}`;
+            alertDiv.innerHTML = `
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>${risk.message}</span>
+            `;
+            
+            alertsContainer.appendChild(alertDiv);
+            
+            // Remove alert after 5 seconds
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        });
+    }
+
+    // Initial data load
+    fetch(`/api/athlete/metrics/${athleteId}`)
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                updateDashboard(result.data);
+            }
+        })
+        .catch(error => console.error('Error fetching initial data:', error));
+</script>
 {% endblock %}

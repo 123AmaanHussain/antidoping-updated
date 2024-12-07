@@ -3,195 +3,211 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Labels - Anti-Doping Education</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <title>Smart Labels - Supplement Safety Checker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        .scanner-container {
-            max-width: 1200px;
-            margin: 20px auto;
-            padding: 20px;
+        .safety-badge {
+            font-size: 1.2em;
+            padding: 8px 16px;
+            border-radius: 20px;
+            margin-bottom: 15px;
         }
-        .scanner-section {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        .scanner-preview {
-            width: 100%;
-            max-width: 500px;
-            height: 300px;
-            margin: 20px auto;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #f8f8f8;
-        }
-        .scan-button {
-            padding: 12px 24px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 1.1em;
-            margin: 10px;
-        }
-        .scan-button:hover {
-            background: #0056b3;
-        }
-        .result-section {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-top: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .result-item {
-            margin: 10px 0;
-            padding: 10px;
-            border-bottom: 1px solid #eee;
-        }
-        .result-label {
-            font-weight: bold;
-            margin-right: 10px;
-            color: #333;
-        }
-        .status {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-        .status.safe {
-            background: #d4edda;
-            color: #155724;
-        }
-        .status.warning {
-            background: #fff3cd;
-            color: #856404;
-        }
-        .status.prohibited {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        .instructions {
-            text-align: left;
-            margin: 20px 0;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
-        }
-        .instructions h3 {
+        .safety-Safe { background-color: #28a745; color: white; }
+        .safety-Caution { background-color: #ffc107; color: black; }
+        .safety-Prohibited { background-color: #dc3545; color: white; }
+        
+        .ingredient-card {
+            border-left: 4px solid #007bff;
             margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
         }
-        .instructions ol {
-            margin-left: 20px;
+        
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 20px;
         }
-        .instructions li {
-            margin: 10px 0;
+        
+        #results {
+            display: none;
         }
     </style>
 </head>
 <body>
-    <header>
-        <h1>Smart Labels Scanner</h1>
-    </header>
-
-    <nav class="menu">
-        <a href="/"><i class="fas fa-home"></i> Home</a>
-        <a href="/antidopingwiki"><i class="fas fa-book-reader"></i> Anti-Doping Wiki</a>
-        <a href="/podcasts"><i class="fas fa-podcast"></i> Podcasts</a>
-        <a href="/digitaltwin"><i class="fas fa-user-circle"></i> Digital Twin</a>
-        <a href="/caloriescalculator"><i class="fas fa-calculator"></i> Calories</a>
-        <a href="/smartlabels" class="active"><i class="fas fa-qrcode"></i> Smart Labels</a>
-        <a href="/chat"><i class="fas fa-robot"></i> AI Coach</a>
-        <a href="/games"><i class="fas fa-gamepad"></i> Games</a>
-    </nav>
-
-    <div class="scanner-container">
-        <div class="scanner-section">
-            <h2>Scan Supplement Label</h2>
-            <div class="instructions">
-                <h3>How to Use:</h3>
-                <ol>
-                    <li>Position your supplement label in front of your camera</li>
-                    <li>Ensure good lighting and a clear view of the ingredients list</li>
-                    <li>Click the "Start Scan" button</li>
-                    <li>Hold steady until scanning is complete</li>
-                </ol>
-            </div>
-            <div class="scanner-preview" id="scanner-preview">
-                <i class="fas fa-camera fa-3x" style="color: #666;"></i>
-            </div>
-            <button class="scan-button" onclick="startScan()">
-                <i class="fas fa-camera"></i> Start Scan
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">Anti-Doping Education Platform</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
             </button>
-            <button class="scan-button" style="background: #6c757d;" onclick="uploadImage()">
-                <i class="fas fa-upload"></i> Upload Image
-            </button>
-        </div>
-
-        <div class="result-section" id="result-section" style="display: none;">
-            <h2>Scan Results</h2>
-            <div class="result-item">
-                <span class="result-label">Product Name:</span>
-                <span id="product-name">Premium Whey Protein</span>
-            </div>
-            <div class="result-item">
-                <span class="result-label">Status:</span>
-                <span class="status safe">Safe for Competition</span>
-            </div>
-            <div class="result-item">
-                <span class="result-label">Ingredients Analysis:</span>
-                <ul style="list-style: none; padding-left: 0;">
-                    <li><span class="status safe">✓ Whey Protein Isolate</span></li>
-                    <li><span class="status safe">✓ Natural Flavors</span></li>
-                    <li><span class="status safe">✓ Stevia Extract</span></li>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/digitaltwin">Digital Twin</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/smartlabels">Smart Labels</a>
+                    </li>
                 </ul>
             </div>
-            <div class="result-item">
-                <span class="result-label">Recommendations:</span>
-                <p>This product appears to be safe for competitive athletes. Always verify with your sports organization's specific guidelines.</p>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h1 class="mb-4">Smart Labels - Supplement Safety Checker</h1>
+        
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Check Your Supplement</h5>
+                <p class="card-text">Enter the name of your supplement to analyze its ingredients and safety status.</p>
+                
+                <form id="supplementForm" class="mb-3">
+                    <div class="mb-3">
+                        <label for="supplementName" class="form-label">Supplement Name</label>
+                        <input type="text" class="form-control" id="supplementName" required
+                               placeholder="Enter supplement name (e.g., 'Whey Protein Isolate')">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Analyze Supplement</button>
+                </form>
+            </div>
+        </div>
+
+        <div id="loadingSpinner" class="loading-spinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Analyzing supplement safety and ingredients...</p>
+        </div>
+
+        <div id="results">
+            <div id="safetyResults" class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Safety Analysis</h5>
+                    <div id="safetyBadge" class="safety-badge"></div>
+                    <div id="safetyAnalysis"></div>
+                    
+                    <div class="mt-3">
+                        <h6>Key Concerns:</h6>
+                        <ul id="keyConcerns" class="list-group list-group-flush"></ul>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <h6>Recommendations:</h6>
+                        <ul id="recommendations" class="list-group list-group-flush"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <div id="ingredientsResults" class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Ingredients Analysis</h5>
+                    <p id="supplementType" class="mb-3"></p>
+                    
+                    <h6>Active Ingredients:</h6>
+                    <div id="activeIngredients"></div>
+                    
+                    <h6 class="mt-3">Other Ingredients:</h6>
+                    <ul id="otherIngredients" class="list-group list-group-flush"></ul>
+                    
+                    <h6 class="mt-3">Common Forms:</h6>
+                    <ul id="commonForms" class="list-group list-group-flush"></ul>
+                </div>
             </div>
         </div>
     </div>
 
-    <footer>
-        <p>&copy; 2024 Anti-Doping Education Platform. All rights reserved.</p>
-    </footer>
-
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        function startScan() {
-            // Simulate scanning process
-            document.getElementById('scanner-preview').innerHTML = '<i class="fas fa-spinner fa-spin fa-3x" style="color: #007bff;"></i>';
-            setTimeout(() => {
-                document.getElementById('result-section').style.display = 'block';
-                document.getElementById('scanner-preview').innerHTML = '<i class="fas fa-check-circle fa-3x" style="color: #28a745;"></i>';
-            }, 2000);
-        }
-
-        function uploadImage() {
-            // Simulate file upload
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
-            input.onchange = function(e) {
-                const file = e.target.files[0];
-                if (file) {
-                    document.getElementById('scanner-preview').innerHTML = '<i class="fas fa-spinner fa-spin fa-3x" style="color: #007bff;"></i>';
-                    setTimeout(() => {
-                        document.getElementById('result-section').style.display = 'block';
-                        document.getElementById('scanner-preview').innerHTML = '<i class="fas fa-check-circle fa-3x" style="color: #28a745;"></i>';
-                    }, 2000);
+        document.getElementById('supplementForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const supplementName = document.getElementById('supplementName').value;
+            
+            // Show loading spinner
+            document.getElementById('loadingSpinner').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/supplements/check', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: supplementName
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayResults(data.data);
+                } else {
+                    alert('Error analyzing supplement: ' + data.error);
                 }
-            };
-            input.click();
+            } catch (error) {
+                alert('Error connecting to server: ' + error);
+            } finally {
+                document.getElementById('loadingSpinner').style.display = 'none';
+            }
+        });
+
+        function displayResults(data) {
+            const { ingredients, safety } = data;
+            
+            // Display safety information
+            const safetyBadge = document.getElementById('safetyBadge');
+            safetyBadge.textContent = safety.safety_status;
+            safetyBadge.className = `safety-badge safety-${safety.safety_status}`;
+            
+            document.getElementById('safetyAnalysis').innerHTML = `
+                <p><strong>Analysis:</strong> ${safety.analysis}</p>
+                <p><strong>Competition Safe:</strong> ${safety.competition_safe ? 'Yes' : 'No'}</p>
+                <p><strong>WADA Compliance:</strong> ${safety.wada_compliance}</p>
+                <p><strong>Confidence Level:</strong> ${safety.confidence_level}</p>
+            `;
+            
+            // Display key concerns
+            const concernsList = document.getElementById('keyConcerns');
+            concernsList.innerHTML = safety.key_concerns.map(concern => 
+                `<li class="list-group-item">${concern}</li>`
+            ).join('');
+            
+            // Display recommendations
+            const recommendationsList = document.getElementById('recommendations');
+            recommendationsList.innerHTML = safety.recommendations.map(rec => 
+                `<li class="list-group-item">${rec}</li>`
+            ).join('');
+            
+            // Display ingredients information
+            document.getElementById('supplementType').textContent = 
+                `Supplement Type: ${ingredients.supplement_type}`;
+            
+            // Display active ingredients
+            const activeIngredientsDiv = document.getElementById('activeIngredients');
+            activeIngredientsDiv.innerHTML = ingredients.active_ingredients.map(ing => `
+                <div class="ingredient-card">
+                    <strong>${ing.name}</strong> (${ing.typical_amount})
+                    <br>
+                    <small class="text-muted">Purpose: ${ing.purpose}</small>
+                </div>
+            `).join('');
+            
+            // Display other ingredients
+            const otherIngredientsList = document.getElementById('otherIngredients');
+            otherIngredientsList.innerHTML = ingredients.other_ingredients.map(ing =>
+                `<li class="list-group-item">${ing}</li>`
+            ).join('');
+            
+            // Display common forms
+            const commonFormsList = document.getElementById('commonForms');
+            commonFormsList.innerHTML = ingredients.common_forms.map(form =>
+                `<li class="list-group-item">${form}</li>`
+            ).join('');
+            
+            // Show results
+            document.getElementById('results').style.display = 'block';
         }
     </script>
 </body>

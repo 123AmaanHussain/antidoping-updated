@@ -56,6 +56,52 @@
             padding: 5px 0;
             border-bottom: 1px solid #eee;
         }
+        .input-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .input-group {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+        }
+        .input-group label {
+            width: 200px;
+            margin-right: 10px;
+        }
+        .input-group input, .input-group select {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 200px;
+        }
+        .submit-btn {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .submit-btn:hover {
+            background: #0056b3;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .analysis-section {
+            margin-top: 30px;
+        }
     </style>
 </head>
 <body>
@@ -75,71 +121,304 @@
     </nav>
 
     <div class="container">
-        <div class="profile-section">
-            <h2>Athlete Information</h2>
-            <div class="profile-info">
-                <div class="info-item">
-                    <label>Name:</label>
-                    <span id="athlete-name">Loading...</span>
+        <div class="input-section">
+            <h2>Enter Your Training Data</h2>
+            <form id="athlete-form" onsubmit="submitAthleteData(event)">
+                <div class="form-group">
+                    <h3>Physical Metrics</h3>
+                    <div class="input-group">
+                        <label for="steps">Daily Steps:</label>
+                        <input type="number" id="steps" name="steps" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="heart-rate">Average Heart Rate (bpm):</label>
+                        <input type="number" id="heart-rate" name="heart_rate" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="sleep-hours">Sleep Hours:</label>
+                        <input type="number" id="sleep-hours" name="sleep_hours" step="0.1" required>
+                    </div>
                 </div>
-                <div class="info-item">
-                    <label>Sport:</label>
-                    <span id="athlete-sport">Loading...</span>
+
+                <div class="form-group">
+                    <h3>Training Details</h3>
+                    <div class="input-group">
+                        <label for="training-type">Training Type:</label>
+                        <select id="training-type" name="training_type" required>
+                            <option value="">Select Type</option>
+                            <option value="strength">Strength Training</option>
+                            <option value="cardio">Cardio</option>
+                            <option value="mixed">Mixed</option>
+                            <option value="recovery">Recovery</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="intensity">Training Intensity:</label>
+                        <select id="intensity" name="intensity" required>
+                            <option value="">Select Intensity</option>
+                            <option value="low">Low</option>
+                            <option value="moderate">Moderate</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="duration">Training Duration (minutes):</label>
+                        <input type="number" id="duration" name="duration" required>
+                    </div>
                 </div>
-                <div class="info-item">
-                    <label>Training Status:</label>
-                    <span id="training-status">Loading...</span>
+
+                <div class="form-group">
+                    <h3>Recovery & Wellness</h3>
+                    <div class="input-group">
+                        <label for="stress-level">Stress Level:</label>
+                        <select id="stress-level" name="stress_level" required>
+                            <option value="">Select Level</option>
+                            <option value="low">Low</option>
+                            <option value="moderate">Moderate</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="soreness">Muscle Soreness:</label>
+                        <select id="soreness" name="soreness" required>
+                            <option value="">Select Level</option>
+                            <option value="none">None</option>
+                            <option value="mild">Mild</option>
+                            <option value="moderate">Moderate</option>
+                            <option value="severe">Severe</option>
+                        </select>
+                    </div>
                 </div>
+
+                <button type="submit" class="submit-btn">Get Analysis</button>
+            </form>
+        </div>
+
+        <div class="analysis-section" id="analysis-section" style="display: none;">
+            <h2>Your Performance Analysis</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>Training Load</h3>
+                    <div id="training-analysis"></div>
+                </div>
+                <div class="metric-card">
+                    <h3>Recovery Status</h3>
+                    <div id="recovery-analysis"></div>
+                </div>
+                <div class="metric-card">
+                    <h3>Performance Insights</h3>
+                    <div id="performance-insights"></div>
+                </div>
+            </div>
+            <div class="recommendations-section">
+                <h3>Personalized Recommendations</h3>
+                <div id="recommendations-list"></div>
             </div>
         </div>
 
-        <div class="metrics-section">
-            <div class="metric-card">
-                <h3>Physical Metrics</h3>
-                <ul>
-                    <li>Heart Rate: <span id="heart-rate">Loading...</span></li>
-                    <li>Blood Pressure: <span id="blood-pressure">Loading...</span></li>
-                    <li>VO2 Max: <span id="vo2-max">Loading...</span></li>
-                </ul>
-            </div>
-            <div class="metric-card">
-                <h3>Training Load</h3>
-                <ul>
-                    <li>Weekly Hours: <span id="weekly-hours">Loading...</span></li>
-                    <li>Intensity Level: <span id="intensity-level">Loading...</span></li>
-                    <li>Recovery Status: <span id="recovery-status">Loading...</span></li>
-                </ul>
-            </div>
-        </div>
-
-        <div class="recommendations-section">
-            <h2>Personalized Recommendations</h2>
-            <div id="recommendations">
-                Loading recommendations...
+        <div class="mt-4">
+            <h4>Performance Analysis</h4>
+            <div id="performanceResults" style="display: none;">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">ML Performance Analysis</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="performance-score mb-3">
+                                    <h6>Performance Score</h6>
+                                    <div class="progress">
+                                        <div id="performanceScoreBar" class="progress-bar" role="progressbar"></div>
+                                    </div>
+                                    <small id="performanceScoreText" class="text-muted"></small>
+                                </div>
+                                
+                                <div class="training-load mb-3">
+                                    <h6>Training Load Status</h6>
+                                    <span id="trainingLoadBadge" class="badge"></span>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <h6>Factor Impact Analysis</h6>
+                                <div id="featureImportance"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="recommendations mt-3">
+                            <h6>Personalized Recommendations</h6>
+                            <ul id="mlRecommendations" class="list-group list-group-flush"></ul>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Simulated data - In a real application, this would come from your backend
-        setTimeout(() => {
-            document.getElementById('athlete-name').textContent = 'John Doe';
-            document.getElementById('athlete-sport').textContent = 'Track and Field';
-            document.getElementById('training-status').textContent = 'Active';
-            document.getElementById('heart-rate').textContent = '65 bpm';
-            document.getElementById('blood-pressure').textContent = '120/80';
-            document.getElementById('vo2-max').textContent = '50 ml/kg/min';
-            document.getElementById('weekly-hours').textContent = '15 hours';
-            document.getElementById('intensity-level').textContent = 'Moderate';
-            document.getElementById('recovery-status').textContent = 'Good';
-            document.getElementById('recommendations').innerHTML = `
-                <ul>
-                    <li>Increase hydration during training sessions</li>
-                    <li>Add more recovery time between high-intensity workouts</li>
-                    <li>Focus on flexibility training this week</li>
-                </ul>
-            `;
-        }, 1000);
+        function submitAthleteData(event) {
+            event.preventDefault();
+            
+            const formData = {
+                steps: document.getElementById('steps').value,
+                heart_rate: document.getElementById('heart-rate').value,
+                sleep_hours: document.getElementById('sleep-hours').value,
+                training_type: document.getElementById('training-type').value,
+                intensity: document.getElementById('intensity').value,
+                duration: document.getElementById('duration').value,
+                stress_level: document.getElementById('stress-level').value,
+                soreness: document.getElementById('soreness').value
+            };
+
+            fetch('/api/athlete/analyze', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('analysis-section').style.display = 'block';
+                
+                // Update training analysis
+                document.getElementById('training-analysis').innerHTML = `
+                    <p><strong>Load Level:</strong> ${data.training_load}</p>
+                    <p><strong>Intensity Analysis:</strong> ${data.intensity_analysis}</p>
+                    <p><strong>Volume Status:</strong> ${data.volume_status}</p>
+                `;
+
+                // Update recovery analysis
+                document.getElementById('recovery-analysis').innerHTML = `
+                    <p><strong>Recovery Score:</strong> ${data.recovery_score}</p>
+                    <p><strong>Sleep Quality:</strong> ${data.sleep_quality}</p>
+                    <p><strong>Readiness:</strong> ${data.readiness}</p>
+                `;
+
+                // Update performance insights
+                document.getElementById('performance-insights').innerHTML = `
+                    <p><strong>Performance Level:</strong> ${data.performance_level}</p>
+                    <p><strong>Trend:</strong> ${data.trend}</p>
+                    <p><strong>Areas of Focus:</strong> ${data.focus_areas}</p>
+                `;
+
+                // Update recommendations
+                document.getElementById('recommendations-list').innerHTML = data.recommendations
+                    .map(rec => `<div class="recommendation-item">
+                        <h4>${rec.category}</h4>
+                        <p>${rec.text}</p>
+                    </div>`).join('');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error analyzing data. Please try again.');
+            });
+        }
+
+        async function submitForm(event) {
+            event.preventDefault();
+            
+            const formData = {
+                sleep_hours: parseFloat(document.getElementById('sleep-hours').value),
+                training_intensity: parseFloat(document.getElementById('intensity').value),
+                stress_level: parseFloat(document.getElementById('stress-level').value),
+                recovery_score: parseFloat(document.getElementById('soreness').value),
+                // Add other form fields as needed
+            };
+
+            try {
+                // Get ML performance analysis
+                const mlResponse = await fetch('/api/athlete/analyze-performance', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                const mlData = await mlResponse.json();
+                
+                if (mlData.success) {
+                    displayPerformanceAnalysis(mlData.ml_analysis);
+                } else {
+                    console.error('ML Analysis Error:', mlData.error);
+                }
+                
+                // Original form submission for Gemini analysis
+                const response = await fetch('/api/athlete/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    console.error('Analysis Error:', data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        function displayPerformanceAnalysis(analysis) {
+            const performanceResults = document.getElementById('performanceResults');
+            performanceResults.style.display = 'block';
+            
+            // Update performance score
+            const scoreBar = document.getElementById('performanceScoreBar');
+            const scoreText = document.getElementById('performanceScoreText');
+            scoreBar.style.width = `${analysis.performance_score}%`;
+            scoreBar.className = `progress-bar ${getScoreClass(analysis.performance_score)}`;
+            scoreText.textContent = `Score: ${analysis.performance_score.toFixed(1)}`;
+            
+            // Update training load badge
+            const loadBadge = document.getElementById('trainingLoadBadge');
+            loadBadge.textContent = analysis.training_load_status;
+            loadBadge.className = `badge ${getLoadClass(analysis.training_load_status)}`;
+            
+            // Display feature importance
+            const featureDiv = document.getElementById('featureImportance');
+            featureDiv.innerHTML = Object.entries(analysis.feature_importance)
+                .map(([feature, importance]) => `
+                    <div class="feature-importance-item">
+                        <small>${feature}</small>
+                        <div class="progress">
+                            <div class="progress-bar bg-info" role="progressbar" 
+                                 style="width: ${importance * 100}%">
+                                ${(importance * 100).toFixed(1)}%
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            
+            // Display recommendations
+            const recList = document.getElementById('mlRecommendations');
+            recList.innerHTML = analysis.recommendations
+                .map(rec => `
+                    <li class="list-group-item">
+                        <strong>${rec.factor}:</strong> ${rec.message}
+                    </li>
+                `).join('');
+        }
+
+        function getScoreClass(score) {
+            if (score >= 80) return 'bg-success';
+            if (score >= 60) return 'bg-warning';
+            return 'bg-danger';
+        }
+
+        function getLoadClass(load) {
+            switch (load) {
+                case 'High': return 'bg-danger';
+                case 'Moderate': return 'bg-warning';
+                case 'Low': return 'bg-success';
+                default: return 'bg-secondary';
+            }
+        }
     </script>
 
     <footer>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="600" height="800" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background -->
+    <rect width="600" height="800" fill="#ffffff"/>
+    
+    <!-- Product Title -->
+    <text x="50" y="100" font-family="Arial" font-size="40" font-weight="bold">Pre-Workout Supplement XYZ</text>
+    <text x="50" y="150" font-family="Arial" font-size="30">By FitFuel</text>
+    
+    <!-- Ingredients List -->
+    <text x="50" y="220" font-family="Arial" font-size="25" font-weight="bold">Ingredients:</text>
+    <text x="50" y="260" font-family="Arial" font-size="20">• Caffeine (200mg)</text>
+    <text x="50" y="290" font-family="Arial" font-size="20">• Beta-Alanine (3.2g)</text>
+    <text x="50" y="320" font-family="Arial" font-size="20">• L-Citrulline (6g)</text>
+    <text x="50" y="350" font-family="Arial" font-size="20">• Creatine Monohydrate (5g)</text>
+    <text x="50" y="380" font-family="Arial" font-size="20">• L-Theanine (100mg)</text>
+    <text x="50" y="410" font-family="Arial" font-size="20">• Taurine (1g)</text>
+    <text x="50" y="440" font-family="Arial" font-size="20">• B-Vitamins Complex</text>
+    
+    <!-- Warning Box -->
+    <rect x="50" y="500" width="500" height="100" fill="#ffebee" stroke="#f44336"/>
+    <text x="70" y="540" font-family="Arial" font-size="18" fill="#d32f2f">
+        Warning: Contains high caffeine content (200mg per serving).
+    </text>
+    <text x="70" y="570" font-family="Arial" font-size="18" fill="#d32f2f">
+        Not recommended within 6 hours of competition.
+    </text>
+</svg>

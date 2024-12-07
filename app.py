@@ -1,8 +1,19 @@
-# Flask and Extensions
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
-from flask_cors import CORS
+import sys
+import os
 
-# Database
+# Add project root directory to Python path
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+# Flask and Extensions
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, session, redirect, url_for, flash
+from flask_cors import CORS
+from flask_socketio import SocketIO
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+
+# Database and Models
+from models import db, User, Notification, NewsletterSubscription, init_db
 from pymongo import MongoClient
 from bson import ObjectId
 
@@ -30,11 +41,16 @@ import xml.etree.ElementTree as ET
 import html
 from collections import deque
 
+# Project modules
+from simulator import *
+from utils.notifications import NotificationService
+
 # Standard Library
 import os
 import json
 import time
 import random
+import string
 import logging
 import requests
 from datetime import datetime, timedelta
@@ -43,58 +59,67 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Initialize Flask
+app = Flask(__name__, static_folder="static")
+
+# Configure Flask app
+app.config.update(
+    SECRET_KEY=os.getenv('FLASK_SECRET_KEY', 'default-secret-key-for-development'),
+    SQLALCHEMY_DATABASE_URI=os.getenv('DATABASE_URL', 'sqlite:///antidoping.db'),
+    SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    MONGO_URI=os.getenv('MONGO_URI', 'mongodb://localhost:27017/'),
+    NEWS_API_KEY=os.getenv('NEWS_API_KEY'),
+    OPENAI_API_KEY=os.getenv('OPENAI_API_KEY'),
+    UPLOAD_FOLDER=os.path.join(app.root_path, 'static/uploads'),
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024  # 16MB max file size
+)
+
+# Ensure upload directory exists
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Initialize MongoDB for legacy support
+try:
+    client = MongoClient(app.config['MONGO_URI'])
+    mongo_db = client['antidoping']
+    client.server_info()  # Test connection
+except Exception as e:
+    app.logger.warning(f"MongoDB connection failed: {e}")
+    mongo_db = None
+
+# Initialize Flask extensions
+db.init_app(app)  # SQLAlchemy
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Initialize services
+try:
+    notification_service = NotificationService()
+except Exception as e:
+    app.logger.error(f"Failed to initialize NotificationService: {e}")
+    notification_service = None
+
+# Configure logging
+logging.basicConfig(
+    filename='antidoping.log',
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s: %(message)s'
+)
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return User.query.get(int(user_id))
+    except Exception as e:
+        app.logger.error(f"Error loading user {user_id}: {e}")
+        return None
+
 # Get API key from environment variable
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 print(f"API Key loaded: {'[MASKED]' if GOOGLE_API_KEY else 'None'}")
-
-app = Flask(__name__, static_folder="static")
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
-CORS(app)
-
-# Initialize MongoDB connection with error handling
-try:
-    client = MongoClient(os.getenv('MONGO_URI', 'mongodb://localhost:27017/'), serverSelectionTimeoutMS=5000)
-    client.server_info()  # This will raise an exception if MongoDB is not running
-    db = client['gamified_quizzes']
-    logging.info("Successfully connected to MongoDB")
-except Exception as e:
-    logging.error(f"Failed to connect to MongoDB: {str(e)}")
-    # Create an in-memory quiz storage as fallback
-    class InMemoryQuizDB:
-        def __init__(self):
-            self.quizzes = {}
-            self.quiz_results = {}
-        
-        def find_one(self, query, projection=None):
-            quiz_id = query.get('quiz_id')
-            return self.quizzes.get(quiz_id)
-        
-        def insert_one(self, document):
-            if 'quiz_id' in document:
-                self.quizzes[document['quiz_id']] = document
-            return type('obj', (object,), {'inserted_id': 1})
-        
-        def drop(self):
-            self.quizzes.clear()
-    
-    db = type('obj', (object,), {
-        'quizzes': InMemoryQuizDB(),
-        'quiz_results': {},
-        'podcasts': {}
-    })
-    logging.warning("Using in-memory storage as fallback")
-
-nutrition_plans = db.nutrition_plans
-
-# Initialize logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler('antidoping.log'),
-        logging.StreamHandler()
-    ]
-)
 
 # Initialize News API
 newsapi = NewsApiClient(api_key=os.getenv('NEWS_API_KEY'))
@@ -166,9 +191,9 @@ SAMPLE_PODCASTS = [
 def init_sample_podcasts():
     try:
         # Check if podcasts collection exists and is empty
-        if 'podcasts' not in db.list_collection_names() or db.podcasts.count_documents({}) == 0:
+        if 'podcasts' not in mongo_db.list_collection_names() or mongo_db.podcasts.count_documents({}) == 0:
             # Insert sample podcasts
-            db.podcasts.insert_many(SAMPLE_PODCASTS)
+            mongo_db.podcasts.insert_many(SAMPLE_PODCASTS)
             logging.info("Initialized sample podcast data")
     except Exception as e:
         logging.error(f"Error initializing sample podcasts: {str(e)}")
@@ -197,6 +222,7 @@ def digitaltwin():
 
 @app.route("/smartlabels")
 def smartlabels():
+    app.logger.debug("Accessing smart labels page")
     return render_template("smartlabels.html")
 
 @app.route('/antidopingwiki')
@@ -210,10 +236,22 @@ def antidopingwiki():
         return render_template('antidopingwiki.html', news=news_cache['data'])
     
     try:
-        # Fetch news about doping in sports
+        all_news = []
+        
+        # Fetch international doping news
         doping_response = newsapi.get_everything(
             q='doping sports athletics',
             language='en',
+            sort_by='publishedAt',
+            from_param=(datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d'),
+            page_size=10
+        )
+        
+        # Fetch local doping news (using country-specific sources)
+        local_doping_response = newsapi.get_everything(
+            q='doping sports athletics',
+            language='en',
+            domains='timesofindia.indiatimes.com,hindustantimes.com,indianexpress.com',  # Add more local sources
             sort_by='publishedAt',
             from_param=(datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d'),
             page_size=10
@@ -226,9 +264,7 @@ def antidopingwiki():
             page_size=10
         )
         
-        all_news = []
-        
-        # Process doping news
+        # Process international doping news
         if doping_response.get('status') == 'ok' and doping_response.get('articles'):
             for article in doping_response['articles']:
                 if article.get('title') and article.get('description'):
@@ -240,7 +276,22 @@ def antidopingwiki():
                         'publishedAt': datetime.strptime(article.get('publishedAt', datetime.utcnow().isoformat()), 
                                                        '%Y-%m-%dT%H:%M:%SZ').strftime('%B %d, %Y'),
                         'source': article.get('source', {}).get('name', 'Unknown Source'),
-                        'category': 'Doping News'
+                        'category': 'International Doping News'
+                    })
+        
+        # Process local doping news
+        if local_doping_response.get('status') == 'ok' and local_doping_response.get('articles'):
+            for article in local_doping_response['articles']:
+                if article.get('title') and article.get('description'):
+                    all_news.append({
+                        'title': article.get('title', ''),
+                        'description': article.get('description', ''),
+                        'url': article.get('url', '#'),
+                        'image': article.get('urlToImage', None),
+                        'publishedAt': datetime.strptime(article.get('publishedAt', datetime.utcnow().isoformat()), 
+                                                       '%Y-%m-%dT%H:%M:%SZ').strftime('%B %d, %Y'),
+                        'source': article.get('source', {}).get('name', 'Unknown Source'),
+                        'category': 'Local Doping News'
                     })
             
         # Process sports news
@@ -258,6 +309,58 @@ def antidopingwiki():
                         'category': 'Sports News'
                     })
         
+        # Add static content for laws, punishments, and real-life cases
+        static_content = {
+            'laws': {
+                'title': 'Anti-Doping Laws and Regulations',
+                'sections': [
+                    {
+                        'title': 'WADA Code',
+                        'content': 'The World Anti-Doping Code is the core document that harmonizes anti-doping policies, rules, and regulations within sport organizations and among public authorities around the world.',
+                        'link': 'https://www.wada-ama.org/en/what-we-do/world-anti-doping-code'
+                    },
+                    {
+                        'title': 'National Anti-Doping Laws',
+                        'content': 'Each country has its own anti-doping laws and regulations that align with the WADA Code while addressing specific national requirements.',
+                        'link': 'https://www.nadaindia.org/en/rules-regulations'
+                    }
+                ]
+            },
+            'punishments': {
+                'title': 'Consequences of Doping',
+                'sections': [
+                    {
+                        'title': 'Sports Sanctions',
+                        'content': 'Athletes found guilty of doping violations may face: Competition results voided, Medal/prize forfeitures, Competition bans (2-4 years for first violation, up to lifetime for repeat offenses)',
+                    },
+                    {
+                        'title': 'Legal Consequences',
+                        'content': 'Criminal charges in some jurisdictions, Financial penalties, Loss of sponsorships and endorsements'
+                    }
+                ]
+            },
+            'cases': {
+                'title': 'Notable Doping Cases',
+                'sections': [
+                    {
+                        'title': 'Lance Armstrong Case',
+                        'content': 'Seven-time Tour de France winner stripped of titles and banned from cycling for life in 2012 due to systematic doping.',
+                        'year': '2012'
+                    },
+                    {
+                        'title': 'Russian Olympic Ban',
+                        'content': 'Russia banned from major international sporting events including Olympics due to state-sponsored doping program.',
+                        'year': '2019'
+                    },
+                    {
+                        'title': 'Ben Johnson',
+                        'content': 'Stripped of 1988 Olympic gold medal after testing positive for stanozolol. Became a landmark case in anti-doping history.',
+                        'year': '1988'
+                    }
+                ]
+            }
+        }
+        
         if all_news:
             # Update cache if we got news successfully
             news_cache['last_update'] = current_time
@@ -274,26 +377,26 @@ def antidopingwiki():
         else:
             all_news = [
                 {
-                    'title': 'Sample Sports News',
-                    'description': 'This is a sample sports news article. The news API might be temporarily unavailable.',
+                    'title': 'Sample International News',
+                    'description': 'This is a sample international news article. The news API might be temporarily unavailable.',
                     'url': '#',
                     'image': None,
                     'publishedAt': datetime.utcnow().strftime('%B %d, %Y'),
                     'source': 'Sample Source',
-                    'category': 'Sports News'
+                    'category': 'International Doping News'
                 },
                 {
-                    'title': 'Sample Doping News',
-                    'description': 'This is a sample doping news article. The news API might be temporarily unavailable.',
+                    'title': 'Sample Local News',
+                    'description': 'This is a sample local news article. The news API might be temporarily unavailable.',
                     'url': '#',
                     'image': None,
                     'publishedAt': datetime.utcnow().strftime('%B %d, %Y'),
                     'source': 'Sample Source',
-                    'category': 'Doping News'
+                    'category': 'Local Doping News'
                 }
             ]
     
-    return render_template('antidopingwiki.html', news=all_news)
+    return render_template('antidopingwiki.html', news=all_news, static_content=static_content)
 
 @app.route("/caloriescalculator")
 def caloriescalculator():
@@ -311,13 +414,13 @@ def games():
 def get_quiz(quiz_id):
     try:
         logging.info(f"Fetching quiz with ID: {quiz_id}")
-        quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
+        quiz = mongo_db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
         logging.info(f"Found quiz: {quiz}")
         
         if not quiz:
             # Try to initialize quiz data
             if init_quiz_data():
-                quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
+                quiz = mongo_db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
         
         if quiz:
             return jsonify({
@@ -607,7 +710,7 @@ class PodcastFetcher:
             # Try Spotify if iTunes doesn't return enough results
             if len(all_podcasts) < 20:
                 spotify_podcasts = self.fetch_spotify_podcasts()
-                all_podcasts.extend(spotify_podcasts)
+                all_podcasts.extend(spotcast_podcasts)
         except Exception as spotify_error:
             logging.warning(f"Spotify fetch failed, continuing with iTunes results: {str(spotify_error)}")
         
@@ -742,6 +845,7 @@ def get_podcasts():
 def submit_quiz():
     try:
         data = request.get_json()
+        app.logger.info(f"Received quiz submission: {data}")
         
         # Validate required fields
         required_fields = ['user_id', 'quiz_id', 'answers']
@@ -754,8 +858,11 @@ def submit_quiz():
         answers = data['answers']
         email = data.get('email', '')  # Optional email for blockchain certificate
 
+        if not user_id:
+            raise ValueError("User ID is required")
+
         # Get quiz data
-        quiz = db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
+        quiz = mongo_db.quizzes.find_one({"quiz_id": quiz_id}, {"_id": 0})
         if not quiz:
             raise ValueError("Invalid quiz ID")
 
@@ -794,40 +901,52 @@ def submit_quiz():
                         app.logger.error(f"Error minting blockchain certificate: {str(e)}")
                 
                 # Generate PDF certificate with token_id if available
-                pdf_path = generate_pdf_certificate(user_id, quiz_id, score, timestamp, token_id)
-                
-                # Store certificate path
-                quiz_result['pdf_certificate'] = os.path.basename(pdf_path)
-                
-                # Generate certificate metadata
-                metadata = {
-                    'user_id': user_id,
-                    'quiz_id': quiz_id,
-                    'score': score,
-                    'timestamp': timestamp.isoformat(),
-                    'token_id': token_id
-                }
-                
-                certificate_data = {
-                    'token_id': token_id,
-                    'metadata': metadata,
-                    'pdf_path': os.path.basename(pdf_path)
-                }
-                
-                quiz_result['certificate'] = certificate_data
+                try:
+                    pdf_filename = generate_pdf_certificate(user_id, quiz_id, score, timestamp, token_id)
+                    app.logger.info(f"Generated certificate PDF: {pdf_filename}")
+                    
+                    # Store certificate path
+                    quiz_result['pdf_certificate'] = pdf_filename
+                    
+                    # Generate certificate metadata
+                    metadata = {
+                        'user_id': user_id,
+                        'quiz_id': quiz_id,
+                        'score': score,
+                        'timestamp': timestamp.isoformat(),
+                        'token_id': token_id
+                    }
+                    
+                    certificate_data = {
+                        'token_id': token_id,
+                        'metadata': metadata,
+                        'pdf_path': pdf_filename,
+                        'user_id': user_id
+                    }
+                    
+                    quiz_result['certificate'] = certificate_data
+                    app.logger.info(f"Certificate data prepared: {certificate_data}")
+                    
+                except Exception as e:
+                    app.logger.error(f"Error generating PDF certificate: {str(e)}")
+                    raise
                 
             except Exception as e:
                 app.logger.error(f"Error generating certificate: {str(e)}")
                 certificate_data = {'error': str(e)}
         
         # Store result in database
-        db.quiz_results.insert_one(quiz_result)
+        mongo_db.quiz_results.insert_one(quiz_result)
+        app.logger.info(f"Quiz result stored for user {user_id}")
 
-        return jsonify({
+        response_data = {
             'success': True,
             'score': score,
-            'certificate': certificate_data
-        })
+            'certificate': certificate_data,
+            'user_id': user_id  # Include user_id in response
+        }
+        app.logger.info(f"Sending response: {response_data}")
+        return jsonify(response_data)
 
     except Exception as e:
         app.logger.error(f"Error submitting quiz: {str(e)}")
@@ -839,11 +958,49 @@ def submit_quiz():
 @app.route('/download_certificate/<user_id>/<filename>')
 def download_certificate(user_id, filename):
     try:
-        # Security check: ensure filename belongs to the user
-        if not filename.startswith(f"{user_id}_"):
-            raise ValueError("Invalid certificate access")
+        # Validate input parameters
+        if not user_id or not filename:
+            app.logger.error("Missing user_id or filename")
+            return jsonify({
+                'success': False,
+                'error': "Invalid request parameters"
+            }), 400
+
+        # Log request details
+        app.logger.info(f"Certificate download requested - User: {user_id}, File: {filename}")
+        
+        # Security check: ensure filename belongs to the user (check both formats)
+        if not (filename.startswith(f"{user_id}_") or filename.startswith(f"certificate_{user_id}_")):
+            app.logger.warning(f"Invalid certificate access attempt - User: {user_id}, File: {filename}")
+            return jsonify({
+                'success': False,
+                'error': "Invalid certificate access"
+            }), 403
             
         certificate_dir = os.path.join(os.path.dirname(__file__), 'certificates')
+        app.logger.info(f"Looking for certificate in: {certificate_dir}")
+        
+        # Ensure certificate directory exists
+        if not os.path.exists(certificate_dir):
+            os.makedirs(certificate_dir)
+            app.logger.info(f"Created certificates directory: {certificate_dir}")
+        
+        certificate_path = os.path.join(certificate_dir, filename)
+        if not os.path.exists(certificate_path):
+            app.logger.error(f"Certificate file not found: {filename}")
+            return jsonify({
+                'success': False,
+                'error': f"Certificate file not found: {filename}"
+            }), 404
+            
+        # Check if the file is actually a PDF
+        if not filename.lower().endswith('.pdf'):
+            app.logger.error(f"Invalid certificate file type: {filename}")
+            return jsonify({
+                'success': False,
+                'error': "Invalid certificate file type"
+            }), 400
+            
         return send_from_directory(
             certificate_dir, 
             filename,
@@ -860,7 +1017,7 @@ def download_certificate(user_id, filename):
 @app.route("/get_progress/<user_id>")
 def get_progress(user_id):
     try:
-        scores = list(db.scores.find({"user_id": user_id}, {"_id": 0}))
+        scores = list(mongo_db.scores.find({"user_id": user_id}, {"_id": 0}))
         return jsonify(scores), 200
     except Exception as e:
         logging.error(f"Error getting progress: {str(e)}")
@@ -952,19 +1109,71 @@ def delete_nutrition_plan(plan_id):
 # Import digital twin service
 from digital_twin_service import DigitalTwin, monitor_athlete
 import asyncio
+from asgiref.sync import async_to_sync
+
+# Initialize digital twin service
+digital_twin = DigitalTwin()
 
 # Digital Twin Routes
-@app.route('/digital-twin')
-def digital_twin_page():
-    """Render the digital twin monitoring page."""
-    return render_template('digital_twin.html')
+@app.route('/digital-twin', methods=['GET', 'POST'])
+def digital_twin_route():
+    if request.method == 'GET':
+        return render_template('digital_twin.html')
+        
+    if request.method == 'POST':
+        try:
+            # Get action from JSON data
+            data = request.get_json()
+            if not data:
+                return jsonify({"status": "error", "message": "No JSON data received"})
+                
+            action = data.get('action')
+            if not action:
+                return jsonify({"status": "error", "message": "No action specified"})
+            
+            logger.info(f"Digital Twin action received: {action}")
+            
+            if action == 'scan':
+                scan_result = async_to_sync(digital_twin.scan_devices)()
+                logger.info(f"Scan result: {scan_result}")
+                return jsonify(scan_result)
+                
+            elif action == 'connect':
+                device_address = data.get('device_address')
+                if not device_address:
+                    return jsonify({"status": "error", "message": "No device address provided"})
+                    
+                logger.info(f"Connecting to device: {device_address}")
+                connect_result = async_to_sync(digital_twin.connect_device)(device_address)
+                logger.info(f"Connect result: {connect_result}")
+                return jsonify(connect_result)
+                
+            elif action == 'get_data':
+                if not digital_twin.connected_device:
+                    return jsonify({"status": "error", "message": "No device connected"})
+                    
+                duration = int(data.get('duration', 60))
+                logger.info(f"Getting data for duration: {duration}s")
+                data_result = async_to_sync(digital_twin.get_monitoring_data)(duration)
+                return jsonify(data_result)
+                
+            elif action == 'disconnect':
+                disconnect_result = async_to_sync(digital_twin.disconnect_current_device)()
+                logger.info(f"Disconnect result: {disconnect_result}")
+                return jsonify(disconnect_result)
+                
+            return jsonify({"status": "error", "message": "Invalid action"})
+            
+        except Exception as e:
+            logger.error(f"Error in digital twin route: {str(e)}")
+            return jsonify({"status": "error", "message": str(e)})
 
 @app.route('/api/digital-twin/scan', methods=['GET'])
-async def scan_devices():
+def scan_devices():
     """Scan for available fitness devices."""
     try:
         digital_twin = DigitalTwin()
-        devices = await digital_twin.device_manager.scan_devices()
+        devices = async_to_sync(digital_twin.device_manager.scan_devices)()
         return jsonify({
             'status': 'success',
             'devices': devices
@@ -976,7 +1185,7 @@ async def scan_devices():
         }), 500
 
 @app.route('/api/digital-twin/connect', methods=['POST'])
-async def connect_device():
+def connect_device():
     """Connect to a specific fitness device."""
     try:
         data = request.get_json()
@@ -989,7 +1198,7 @@ async def connect_device():
             }), 400
         
         digital_twin = DigitalTwin()
-        await digital_twin.initialize(device_address)
+        async_to_sync(digital_twin.initialize)(device_address)
         
         return jsonify({
             'status': 'success',
@@ -1002,13 +1211,13 @@ async def connect_device():
         }), 500
 
 @app.route('/api/digital-twin/monitor', methods=['POST'])
-async def start_monitoring():
+def start_monitoring():
     """Start monitoring athlete's data."""
     try:
         data = request.get_json()
         duration = data.get('duration', 60)  # Default 60 seconds
         
-        insights = await monitor_athlete(duration)
+        insights = async_to_sync(monitor_athlete)(duration)
         
         if insights:
             return jsonify({
@@ -1139,131 +1348,424 @@ def ai_coach_api():
             'success': False
         }), 500
 
-def generate_pdf_certificate(user_id, quiz_id, score, timestamp, token_id=None):
-    """Generate a PDF certificate for quiz completion"""
+@app.route('/smart-labels')
+def smart_labels():
+    app.logger.debug("Accessing smart labels page")
+    return render_template('smart_labels.html')
+
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
+from sklearn.preprocessing import StandardScaler
+import joblib
+import os
+
+# Initialize ML models
+def initialize_ml_models():
+    """Initialize or load ML models"""
+    models_dir = os.path.join(os.path.dirname(__file__), 'models')
+    os.makedirs(models_dir, exist_ok=True)
+    
+    # Supplement Safety Model
+    supplement_model_path = os.path.join(models_dir, 'supplement_safety_model.joblib')
+    if os.path.exists(supplement_model_path):
+        supplement_classifier = joblib.load(supplement_model_path)
+    else:
+        # Initialize with basic training data
+        supplement_classifier = RandomForestClassifier(n_estimators=100)
+        # Example training data structure
+        X_supp = np.array([
+            # [protein_content, stimulant_level, hormone_level, synthetic_compounds]
+            [80, 0, 0, 0],  # Whey Protein
+            [0, 5, 0, 1],   # Pre-workout
+            [0, 0, 90, 1],  # Anabolic steroid
+            [20, 0, 0, 0],  # BCAA
+        ])
+        y_supp = np.array(['safe', 'caution', 'prohibited', 'safe'])
+        supplement_classifier.fit(X_supp, y_supp)
+        joblib.dump(supplement_classifier, supplement_model_path)
+
+    # Athlete Performance Model
+    performance_model_path = os.path.join(models_dir, 'performance_model.joblib')
+    if os.path.exists(performance_model_path):
+        performance_predictor = joblib.load(performance_model_path)
+    else:
+        # Initialize with basic training data
+        performance_predictor = GradientBoostingRegressor(n_estimators=100)
+        # Example training data structure
+        X_perf = np.array([
+            # [sleep_hours, training_intensity, stress_level, recovery_score]
+            [8, 7, 3, 90],
+            [6, 8, 6, 70],
+            [7, 6, 4, 85],
+            [5, 9, 8, 60],
+        ])
+        y_perf = np.array([95, 75, 85, 65])  # Performance scores
+        performance_predictor.fit(X_perf, y_perf)
+        joblib.dump(performance_predictor, performance_model_path)
+
+    return supplement_classifier, performance_predictor
+
+# Initialize models at startup
+supplement_classifier, performance_predictor = initialize_ml_models()
+scaler = StandardScaler()
+
+@app.route('/api/supplements/analyze', methods=['POST'])
+def analyze_supplement_ml():
+    """Analyze supplement using ML model"""
     try:
-        # Create certificates directory if it doesn't exist
-        certificate_dir = os.path.join(os.path.dirname(__file__), 'certificates')
-        os.makedirs(certificate_dir, exist_ok=True)
+        data = request.json
         
-        # Initialize PDF
-        pdf = FPDF()
-        pdf.add_page()
+        # Extract features from Gemini analysis
+        ingredients_response = model.generate_content(f"""
+        Analyze this supplement and provide numerical values for:
+        1. Protein content (0-100)
+        2. Stimulant level (0-100)
+        3. Hormone level (0-100)
+        4. Synthetic compounds presence (0 or 1)
+
+        Supplement: {data.get('name', '')}
+
+        Please provide a response in this JSON format:
+        {{
+            "protein_content": float,
+            "stimulant_level": float,
+            "hormone_level": float,
+            "synthetic_compounds": int
+        }}
+        """)
         
-        # Set margins
-        pdf.set_margins(20, 20, 20)
-        
-        # Add certificate styling
-        pdf.set_font("Arial", "B", 24)
-        pdf.set_text_color(44, 62, 80)  # Dark blue color
-        pdf.cell(0, 30, "Certificate of Achievement", ln=True, align='C')
-        
-        # Add decorative line
-        pdf.set_draw_color(41, 128, 185)  # Light blue
-        pdf.set_line_width(1)
-        pdf.line(30, 45, 180, 45)
-        
-        # Certificate content
-        pdf.set_font("Arial", "", 16)
-        pdf.set_text_color(52, 73, 94)  # Dark gray
-        pdf.cell(0, 30, "This is to certify that", ln=True, align='C')
-        
-        # User ID
-        pdf.set_font("Arial", "B", 20)
-        pdf.cell(0, 15, user_id, ln=True, align='C')
-        
-        # Achievement text
-        pdf.set_font("Arial", "", 16)
-        pdf.cell(0, 15, "has successfully completed the", ln=True, align='C')
-        pdf.set_font("Arial", "B", 18)
-        pdf.cell(0, 15, "Anti-Doping Awareness Quiz", ln=True, align='C')
-        
-        # Score
-        pdf.set_font("Arial", "", 16)
-        pdf.cell(0, 15, f"with a score of", ln=True, align='C')
-        pdf.set_font("Arial", "B", 20)
-        pdf.set_text_color(41, 128, 185)  # Light blue
-        pdf.cell(0, 15, f"{score}%", ln=True, align='C')
-        
-        # Date
-        pdf.set_font("Arial", "", 12)
-        pdf.set_text_color(52, 73, 94)  # Dark gray
-        date_str = timestamp.strftime("%B %d, %Y")
-        pdf.cell(0, 15, f"Date: {date_str}", ln=True, align='C')
-        
-        # Add blockchain verification code if available
-        if token_id:
-            try:
-                # Add verification section
-                pdf.ln(10)
-                pdf.set_font("Arial", "", 10)
-                pdf.set_text_color(128, 128, 128)  # Gray color
-                pdf.cell(0, 10, "Certificate Verification", ln=True, align='C')
-                
-                # Create verification string
-                verification_string = f"0x{token_id:016x}"
-                
-                # Generate QR code
-                import qrcode
-                from PIL import Image
-                import io
-                
-                # Create QR code
-                qr = qrcode.QRCode(
-                    version=1,
-                    error_correction=qrcode.constants.ERROR_CORRECT_L,
-                    box_size=10,
-                    border=4,
-                )
-                qr.add_data(verification_string)
-                qr.make(fit=True)
-                
-                # Create QR code image
-                qr_img = qr.make_image(fill_color="black", back_color="white")
-                
-                # Save QR code to bytes
-                img_byte_arr = io.BytesIO()
-                qr_img.save(img_byte_arr, format='PNG')
-                img_byte_arr = img_byte_arr.getvalue()
-                
-                # Save temporary image file
-                temp_qr_path = os.path.join(certificate_dir, f'temp_qr_{user_id}.png')
-                with open(temp_qr_path, 'wb') as f:
-                    f.write(img_byte_arr)
-                
-                # Add QR code to PDF
-                pdf.image(temp_qr_path, x=85, y=pdf.get_y(), w=40, h=40)
-                
-                # Remove temporary file
-                os.remove(temp_qr_path)
-                
-                # Add some space after QR code
-                pdf.ln(45)
-                
-                # Add verification code
-                pdf.set_font("Courier", "", 8)
-                pdf.cell(0, 5, "Blockchain Verification Code:", ln=True, align='C')
-                pdf.cell(0, 5, verification_string, ln=True, align='C')
-                
-            except Exception as e:
-                logging.error(f"Error adding QR code: {str(e)}")
-                # Still add verification code even if QR fails
-                pdf.ln(10)
-                pdf.set_font("Courier", "", 8)
-                pdf.cell(0, 5, "Blockchain Verification Code:", ln=True, align='C')
-                pdf.cell(0, 5, f"0x{token_id:016x}", ln=True, align='C')
-        
-        # Generate unique filename
-        filename = f"certificate_{user_id}_{quiz_id}_{int(timestamp.timestamp())}.pdf"
-        filepath = os.path.join(certificate_dir, filename)
-        
-        # Save the PDF
-        pdf.output(filepath)
-        return filepath
-        
+        try:
+            features = json.loads(ingredients_response.text)
+            X = np.array([[
+                features['protein_content'],
+                features['stimulant_level'],
+                features['hormone_level'],
+                features['synthetic_compounds']
+            ]])
+            
+            # Get ML prediction
+            ml_prediction = supplement_classifier.predict(X)[0]
+            ml_proba = supplement_classifier.predict_proba(X)[0]
+            
+            return jsonify({
+                'success': True,
+                'ml_analysis': {
+                    'prediction': ml_prediction,
+                    'confidence': float(max(ml_proba)),
+                    'features': features
+                }
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': f'ML analysis error: {str(e)}'
+            })
+
     except Exception as e:
-        logging.error(f"Error generating certificate: {str(e)}")
-        raise
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/athlete/analyze-performance', methods=['POST'])
+def analyze_performance_ml():
+    """Analyze athlete performance using ML model"""
+    try:
+        data = request.json
+        
+        # Extract features
+        X = np.array([[
+            float(data.get('sleep_hours', 0)),
+            float(data.get('training_intensity', 0)),
+            float(data.get('stress_level', 0)),
+            float(data.get('recovery_score', 0))
+        ]])
+        
+        # Get ML prediction
+        performance_score = performance_predictor.predict(X)[0]
+        
+        # Get feature importance
+        feature_importance = dict(zip(
+            ['sleep', 'training', 'stress', 'recovery'],
+            performance_predictor.feature_importances_
+        ))
+        
+        # Generate personalized recommendations
+        recommendations = []
+        if X[0][0] < 7:  # sleep hours
+            recommendations.append({
+                'factor': 'sleep',
+                'message': 'Increase sleep duration to improve recovery and performance'
+            })
+        if X[0][2] > 7:  # stress level
+            recommendations.append({
+                'factor': 'stress',
+                'message': 'Consider stress management techniques to optimize performance'
+            })
+        if X[0][3] < 70:  # recovery score
+            recommendations.append({
+                'factor': 'recovery',
+                'message': 'Focus on recovery protocols to prevent overtraining'
+            })
+        
+        return jsonify({
+            'success': True,
+            'ml_analysis': {
+                'performance_score': float(performance_score),
+                'feature_importance': feature_importance,
+                'recommendations': recommendations,
+                'training_load_status': 'High' if X[0][1] > 7 else 'Moderate' if X[0][1] > 4 else 'Low'
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/supplements/check', methods=['POST'])
+def check_supplement():
+    """Check supplement safety using Gemini AI and ML"""
+    try:
+        data = request.json
+        supplement_name = data.get('name', '')
+        
+        # First get ML analysis
+        ml_response = analyze_supplement_ml()
+        ml_data = ml_response.json
+        
+        # Then get Gemini analysis
+        ingredients_prompt = f"""As a supplement expert, analyze this supplement and list its typical ingredients:
+
+Supplement Name: {supplement_name}
+
+Please provide:
+1. Common ingredients found in this supplement
+2. Active ingredients and their typical amounts
+3. Other ingredients (excipients, fillers, etc.)
+
+Format the response as a JSON object with these fields:
+{{
+    "active_ingredients": [
+        {{
+            "name": "ingredient name",
+            "typical_amount": "amount with unit",
+            "purpose": "brief purpose description"
+        }}
+    ],
+    "other_ingredients": ["list of other ingredients"],
+    "supplement_type": "category of supplement",
+    "common_forms": ["list of common forms (tablets, powder, etc.)"]
+}}"""
+
+        ingredients_response = model.generate_content(ingredients_prompt)
+        try:
+            ingredients_text = ingredients_response.text
+            ingredients_data = json.loads(ingredients_text)
+        except (json.JSONDecodeError, AttributeError):
+            ingredients_data = {
+                "active_ingredients": [{"name": "Unknown", "typical_amount": "N/A", "purpose": "Unable to determine"}],
+                "other_ingredients": ["Unknown"],
+                "supplement_type": "Unknown",
+                "common_forms": ["Unknown"]
+            }
+
+        # Format ingredients for safety analysis
+        active_ingredients = ", ".join([f"{ing['name']} ({ing['typical_amount']})" for ing in ingredients_data['active_ingredients']])
+        other_ingredients = ", ".join(ingredients_data['other_ingredients'])
+        
+        # Include ML prediction in the prompt
+        safety_prompt = f"""As an anti-doping expert, analyze this supplement for safety and competition compliance:
+
+Supplement: {supplement_name}
+Type: {ingredients_data['supplement_type']}
+Active Ingredients: {active_ingredients}
+Other Ingredients: {other_ingredients}
+ML Safety Prediction: {ml_data.get('ml_analysis', {}).get('prediction', 'Unknown')}
+ML Confidence: {ml_data.get('ml_analysis', {}).get('confidence', 0):.2f}
+
+Provide a detailed analysis including:
+1. Overall safety assessment
+2. Competition compliance status
+3. Ingredient analysis
+4. Potential risks
+5. Recommendations for athletes
+
+Format the response as a JSON object with these fields:
+{{
+    "safety_status": "Safe/Caution/Prohibited",
+    "competition_safe": true/false,
+    "analysis": "Detailed safety analysis",
+    "key_concerns": ["List of key concerns if any"],
+    "risks": ["Potential risks"],
+    "recommendations": ["Specific recommendations"],
+    "wada_compliance": "WADA compliance status",
+    "confidence_level": "High/Medium/Low",
+    "alternatives": ["Safer alternatives if needed"]
+}}"""
+
+        safety_response = model.generate_content(safety_prompt)
+        try:
+            safety_text = safety_response.text
+            safety_data = json.loads(safety_text)
+        except (json.JSONDecodeError, AttributeError):
+            safety_data = {
+                "safety_status": "Caution",
+                "competition_safe": False,
+                "analysis": "Unable to determine safety with confidence",
+                "key_concerns": ["Unable to verify ingredients"],
+                "risks": ["Unknown ingredients may be present"],
+                "recommendations": [
+                    "Consult with sports nutritionist",
+                    "Verify with your sports organization",
+                    "Check WADA prohibited substances list"
+                ],
+                "wada_compliance": "Unable to determine",
+                "confidence_level": "Low",
+                "alternatives": ["Consider certified supplements"]
+            }
+
+        # Combine all analyses
+        return jsonify({
+            'success': True,
+            'data': {
+                'ingredients': ingredients_data,
+                'safety': safety_data,
+                'ml_analysis': ml_data.get('ml_analysis', {})
+            }
+        })
+
+    except Exception as e:
+        logging.error(f"Error in supplement check: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/analyze-product', methods=['POST'])
+def analyze_product():
+    try:
+        app.logger.info("Starting product analysis")
+        if 'image' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No image file provided'})
+
+        image_file = request.files['image']
+        if not image_file or not allowed_file(image_file.filename):
+            return jsonify({'status': 'error', 'message': 'Invalid image file'})
+
+        # Process image
+        image_bytes = image_file.read()
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # Generate hash for caching
+        image_hash = hashlib.md5(image_bytes).hexdigest()
+        cache_path = os.path.join(app.config['CACHE_DIR'], f'{image_hash}.json')
+
+        # Check cache
+        if os.path.exists(cache_path):
+            app.logger.info(f"Cache hit for image {image_hash}")
+            with open(cache_path, 'r') as f:
+                return jsonify({'status': 'success', 'analysis': json.load(f)})
+
+        # Prepare image for Gemini
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format=image.format or 'JPEG')
+        img_byte_arr = img_byte_arr.getvalue()
+
+        try:
+            # Try OCR first for better text extraction
+            text_from_image = pytesseract.image_to_string(image)
+            app.logger.info("OCR completed")
+        except Exception as e:
+            app.logger.warning(f"OCR failed: {str(e)}")
+            text_from_image = ""
+
+        # Prepare Gemini model
+        model = genai.GenerativeModel('gemini-pro-vision')
+        
+        # Enhanced prompt for better analysis
+        prompt = f"""
+        Analyze this product label image for athletes. Focus on:
+        1. Product name and type
+        2. Ingredients list
+        3. Potential banned or controlled substances
+        4. Competition status (prohibited, allowed, threshold)
+        5. Risk assessment
+
+        Additional context from OCR: {text_from_image}
+
+        Provide a detailed analysis in this JSON format:
+        {{
+            "product_name": "Product name",
+            "overall_assessment": {{
+                "risk_level": "LOW/MEDIUM/HIGH",
+                "competition_status": "SAFE/CAUTION/PROHIBITED",
+                "warning_message": "Any specific warnings"
+            }},
+            "ingredients_analysis": [
+                {{
+                    "name": "Ingredient name",
+                    "status": "SAFE/CAUTION/PROHIBITED",
+                    "category": "Stimulant/Protein/etc",
+                    "warning": "Specific warning if any"
+                }}
+            ],
+            "recommendations": [
+                "Specific recommendations for the athlete"
+            ]
+        }}
+
+        Focus on WADA prohibited list and common sports supplements.
+        """
+
+        try:
+            # Generate response from Gemini
+            response = model.generate_content([prompt, genai.types.Image.from_bytes(img_byte_arr)])
+            analysis = json.loads(response.text)
+            app.logger.info("Gemini analysis completed")
+            
+            # Cache the result
+            os.makedirs(app.config['CACHE_DIR'], exist_ok=True)
+            with open(cache_path, 'w') as f:
+                json.dump(analysis, f)
+            
+            return jsonify({'status': 'success', 'analysis': analysis})
+
+        except Exception as e:
+            app.logger.error(f"Gemini analysis failed: {str(e)}")
+            # Fallback to basic analysis
+            basic_analysis = {
+                "product_name": "Unknown Product",
+                "overall_assessment": {
+                    "risk_level": "MEDIUM",
+                    "competition_status": "CAUTION",
+                    "warning_message": "Unable to perform detailed analysis. Please consult with your sports physician."
+                },
+                "ingredients_analysis": [
+                    {
+                        "name": "Unknown Ingredients",
+                        "status": "CAUTION",
+                        "category": "Unknown",
+                        "warning": "Could not analyze ingredients. Please check with your team doctor."
+                    }
+                ],
+                "recommendations": [
+                    "Consult with your sports physician or team doctor",
+                    "Check the product against WADA's prohibited list manually",
+                    "Consider using a certified alternative product"
+                ],
+                "source": "fallback"
+            }
+            
+            if text_from_image:
+                basic_analysis["ocr_text"] = text_from_image
+
+            return jsonify({'status': 'success', 'analysis': basic_analysis})
+
+    except Exception as e:
+        app.logger.error(f"Analysis error: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
 
 @app.route('/api/podcasts/upload', methods=['POST'])
 def upload_podcast():
@@ -1311,7 +1813,7 @@ def upload_podcast():
         }
         
         # Save to MongoDB
-        result = db.podcasts.insert_one(podcast)
+        result = mongo_db.podcasts.insert_one(podcast)
         podcast['_id'] = str(result.inserted_id)
         
         return jsonify({
@@ -1328,7 +1830,7 @@ def upload_podcast():
 def delete_podcast(podcast_id):
     try:
         # Find the podcast
-        podcast = db.podcasts.find_one({'_id': ObjectId(podcast_id)})
+        podcast = mongo_db.podcasts.find_one({'_id': ObjectId(podcast_id)})
         if not podcast:
             return jsonify({'success': False, 'error': 'Podcast not found'}), 404
             
@@ -1338,7 +1840,7 @@ def delete_podcast(podcast_id):
             os.remove(file_path)
             
         # Delete from MongoDB
-        db.podcasts.delete_one({'_id': ObjectId(podcast_id)})
+        mongo_db.podcasts.delete_one({'_id': ObjectId(podcast_id)})
         
         return jsonify({'success': True, 'message': 'Podcast deleted successfully'})
         
@@ -1350,7 +1852,7 @@ def delete_podcast(podcast_id):
 def update_podcast(podcast_id):
     try:
         # Get the podcast
-        podcast = db.podcasts.find_one({'_id': ObjectId(podcast_id)})
+        podcast = mongo_db.podcasts.find_one({'_id': ObjectId(podcast_id)})
         if not podcast:
             return jsonify({'success': False, 'error': 'Podcast not found'}), 404
             
@@ -1388,7 +1890,7 @@ def update_podcast(podcast_id):
                 update_data['filename'] = filename
         
         # Update in MongoDB
-        db.podcasts.update_one(
+        mongo_db.podcasts.update_one(
             {'_id': ObjectId(podcast_id)},
             {'$set': update_data}
         )
@@ -1534,5 +2036,489 @@ def fetch_sports_podcasts():
         logging.error(f"Error in fetch_sports_podcasts: {str(e)}")
         return []
 
+# Sample athlete data
+athlete_data = {
+    'profile': {
+        'name': 'John Doe',
+        'sport': 'Track and Field',
+        'age': 24,
+        'height': '180 cm',
+        'weight': '75 kg',
+        'training_level': 'Professional'
+    },
+    'metrics': {
+        'recent_training': {
+            'weekly_hours': 15,
+            'intensity_level': 'High',
+            'recovery_status': 'Good'
+        },
+        'performance': {
+            'vo2_max': '58.5 ml/kg/min',
+            'resting_heart_rate': '52 bpm',
+            'training_zones': {
+                'zone1': '120-140 bpm',
+                'zone2': '140-160 bpm',
+                'zone3': '160-180 bpm'
+            }
+        },
+        'wellness': {
+            'sleep_quality': 'Good',
+            'stress_level': 'Low',
+            'fatigue_index': 'Normal'
+        }
+    },
+    'recommendations': [
+        {
+            'category': 'Training',
+            'text': 'Consider increasing endurance training sessions based on your recent performance metrics.'
+        },
+        {
+            'category': 'Recovery',
+            'text': 'Your sleep quality is good. Maintain your current sleep schedule for optimal recovery.'
+        },
+        {
+            'category': 'Nutrition',
+            'text': 'Pre-competition nutrition plan suggested: focus on complex carbohydrates 3 hours before events.'
+        }
+    ]
+}
+
+# Supplement database with safety information
+supplement_database = {
+    'whey_protein': {
+        'name': 'Whey Protein Isolate',
+        'category': 'Protein',
+        'status': 'Safe',
+        'competition_safe': True,
+        'description': 'Common and well-researched protein supplement.',
+        'recommendations': 'Safe for competition use. Check for quality certification.',
+        'common_brands': ['Brand A', 'Brand B', 'Brand C']
+    },
+    'creatine': {
+        'name': 'Creatine Monohydrate',
+        'category': 'Performance',
+        'status': 'Safe',
+        'competition_safe': True,
+        'description': 'One of the most researched supplements in sports nutrition.',
+        'recommendations': 'Follow recommended loading and maintenance doses.',
+        'common_brands': ['Brand X', 'Brand Y', 'Brand Z']
+    },
+    'pre_workout': {
+        'name': 'Pre-Workout Supplement',
+        'category': 'Performance',
+        'status': 'Caution',
+        'competition_safe': False,
+        'description': 'May contain prohibited substances. Check ingredients carefully.',
+        'recommendations': 'Verify all ingredients against WADA prohibited list.',
+        'warning': 'High risk of contamination with prohibited substances.'
+    }
+}
+
+@app.route('/api/athlete/dashboard')
+def get_athlete_dashboard():
+    """Get athlete's dashboard data including metrics and recommendations"""
+    return jsonify(athlete_data)
+
+# @app.route('/api/supplements/check', methods=['POST'])
+# def check_supplement():
+#     """Check supplement safety using Gemini AI"""
+#     try:
+#         data = request.json
+#         supplement_name = data.get('name', '')
+        
+#         # First prompt to get supplement ingredients
+#         ingredients_prompt = f"""As a supplement expert, analyze this supplement and list its typical ingredients:
+
+# Supplement Name: {supplement_name}
+
+# Please provide:
+# 1. Common ingredients found in this supplement
+# 2. Active ingredients and their typical amounts
+# 3. Other ingredients (excipients, fillers, etc.)
+
+# Format the response as a JSON object with these fields:
+# {{
+#     "active_ingredients": [
+#         {{
+#             "name": "ingredient name",
+#             "typical_amount": "amount with unit",
+#             "purpose": "brief purpose description"
+#         }}
+#     ],
+#     "other_ingredients": ["list of other ingredients"],
+#     "supplement_type": "category of supplement",
+#     "common_forms": ["list of common forms (tablets, powder, etc.)"]
+# }}"""
+
+#         # Get ingredients from Gemini
+#         ingredients_response = model.generate_content(ingredients_prompt)
+        
+#         try:
+#             # Extract the text content from Gemini response
+#             ingredients_text = ingredients_response.text
+#             # Parse the response as JSON
+#             ingredients_data = json.loads(ingredients_text)
+#         except (json.JSONDecodeError, AttributeError):
+#             ingredients_data = {
+#                 "active_ingredients": [{"name": "Unknown", "typical_amount": "N/A", "purpose": "Unable to determine"}],
+#                 "other_ingredients": ["Unknown"],
+#                 "supplement_type": "Unknown",
+#                 "common_forms": ["Unknown"]
+#             }
+
+#         # Format ingredients for safety analysis
+#         active_ingredients = ", ".join([f"{ing['name']} ({ing['typical_amount']})" for ing in ingredients_data['active_ingredients']])
+#         other_ingredients = ", ".join(ingredients_data['other_ingredients'])
+        
+#         # Second prompt for safety analysis
+#         safety_prompt = f"""As an anti-doping expert, analyze this supplement for safety and competition compliance:
+
+# Supplement: {supplement_name}
+# Type: {ingredients_data['supplement_type']}
+# Active Ingredients: {active_ingredients}
+# Other Ingredients: {other_ingredients}
+
+# Provide a detailed analysis including:
+# 1. Overall safety assessment
+# 2. Competition compliance status
+# 3. Ingredient analysis
+# 4. Potential risks
+# 5. Recommendations for athletes
+
+# Format the response as a JSON object with these fields:
+# {{
+#     "safety_status": "Safe/Caution/Prohibited",
+#     "competition_safe": true/false,
+#     "analysis": "Detailed safety analysis",
+#     "key_concerns": ["List of key concerns if any"],
+#     "risks": ["Potential risks"],
+#     "recommendations": ["Specific recommendations"],
+#     "wada_compliance": "WADA compliance status",
+#     "confidence_level": "High/Medium/Low",
+#     "alternatives": ["Safer alternatives if needed"]
+# }}"""
+
+#         # Get safety analysis from Gemini
+#         safety_response = model.generate_content(safety_prompt)
+        
+#         try:
+#             # Extract the text content from Gemini response
+#             safety_text = safety_response.text
+#             # Parse the response as JSON
+#             safety_data = json.loads(safety_text)
+#         except (json.JSONDecodeError, AttributeError):
+#             safety_data = {
+#                 "safety_status": "Caution",
+#                 "competition_safe": False,
+#                 "analysis": "Unable to determine safety with confidence",
+#                 "key_concerns": ["Unable to verify ingredients"],
+#                 "risks": ["Unknown ingredients may be present"],
+#                 "recommendations": [
+#                     "Consult with sports nutritionist",
+#                     "Verify with your sports organization",
+#                     "Check WADA prohibited substances list"
+#                 ],
+#                 "wada_compliance": "Unable to determine",
+#                 "confidence_level": "Low",
+#                 "alternatives": ["Consider certified supplements"]
+#             }
+
+#         # Combine both analyses
+#         return jsonify({
+#             'success': True,
+#             'data': {
+#                 'ingredients': ingredients_data,
+#                 'safety': safety_data
+#             }
+#         })
+
+#     except Exception as e:
+#         logging.error(f"Error in supplement check: {str(e)}")
+#         return jsonify({
+#             'success': False,
+#             'error': str(e)
+#         }), 500
+
+@app.route('/api/athlete/analyze', methods=['POST'])
+def analyze_athlete_data():
+    """Analyze athlete's training data using Gemini AI"""
+    try:
+        data = request.json
+        
+        # Construct prompt for Gemini
+        prompt = f"""As a professional sports performance analyst, analyze this athlete's data and provide recommendations:
+
+Training Data:
+- Daily Steps: {data.get('steps')}
+- Heart Rate: {data.get('heart_rate')} bpm
+- Sleep Hours: {data.get('sleep_hours')}
+- Training Type: {data.get('training_type')}
+- Training Intensity: {data.get('intensity')}
+- Training Duration: {data.get('duration')} minutes
+- Stress Level: {data.get('stress_level')}
+- Muscle Soreness: {data.get('soreness')}
+
+Please analyze this data and provide:
+1. Training load assessment
+2. Recovery status evaluation
+3. Performance analysis
+4. Specific recommendations
+
+Format the response as a JSON object with these fields:
+{{
+    "training_load": "Current training load status",
+    "intensity_analysis": "Analysis of training intensity",
+    "volume_status": "Training volume assessment",
+    "recovery_score": "Recovery score out of 100",
+    "sleep_quality": "Sleep quality assessment",
+    "readiness": "Training readiness status",
+    "performance_level": "Current performance level",
+    "trend": "Performance trend (improving/stable/declining)",
+    "focus_areas": "Key areas to focus on",
+    "recommendations": [
+        {{
+            "category": "Training/Recovery/Nutrition",
+            "text": "Specific recommendation"
+        }}
+    ]
+}}"""
+
+        # Get response from Gemini
+        response = model.generate_content(prompt)
+        
+        try:
+            # Parse the response as JSON
+            analysis = json.loads(response.text)
+            return jsonify(analysis)
+        except json.JSONDecodeError:
+            # Fallback response if AI response isn't proper JSON
+            return jsonify({
+                "training_load": "Moderate",
+                "intensity_analysis": "Consider your current intensity level",
+                "volume_status": "Review training volume",
+                "recovery_score": "70",
+                "sleep_quality": "Adequate",
+                "readiness": "Ready for light training",
+                "performance_level": "Maintaining",
+                "trend": "Stable",
+                "focus_areas": "Recovery and stress management",
+                "recommendations": [
+                    {
+                        "category": "Training",
+                        "text": "Monitor your training intensity and adjust based on recovery status"
+                    },
+                    {
+                        "category": "Recovery",
+                        "text": "Ensure adequate rest between sessions"
+                    }
+                ]
+            })
+
+    except Exception as e:
+        logging.error(f"Error in athlete analysis: {str(e)}")
+        return jsonify({
+            'error': str(e)
+        }), 500
+
+import os
+from datetime import datetime
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.units import inch
+from reportlab.lib.colors import HexColor
+
+def generate_pdf_certificate(user_id, quiz_id, score, timestamp, token_id=None):
+    """Generate a PDF certificate for the user."""
+    try:
+        # Create certificates directory if it doesn't exist
+        certificate_dir = os.path.join(os.path.dirname(__file__), 'certificates')
+        if not os.path.exists(certificate_dir):
+            os.makedirs(certificate_dir)
+            
+        # Generate unique filename
+        filename = f"{user_id}_{quiz_id}_{int(timestamp.timestamp())}.pdf"
+        filepath = os.path.join(certificate_dir, filename)
+        
+        # Create PDF
+        c = canvas.Canvas(filepath, pagesize=letter)
+        width, height = letter
+        
+        # Set background color
+        c.setFillColor(HexColor('#f8f9fa'))
+        c.rect(0, 0, width, height, fill=True)
+        
+        # Add certificate title
+        c.setFillColor(HexColor('#212529'))
+        c.setFont("Helvetica-Bold", 24)
+        c.drawCentredString(width/2, height-2*inch, "Certificate of Completion")
+        
+        # Add anti-doping education details
+        c.setFont("Helvetica", 16)
+        c.drawCentredString(width/2, height-3*inch, "This is to certify that")
+        
+        # Add user name/ID
+        c.setFont("Helvetica-Bold", 20)
+        c.drawCentredString(width/2, height-3.5*inch, user_id)
+        
+        # Add completion text
+        c.setFont("Helvetica", 16)
+        c.drawCentredString(width/2, height-4*inch, 
+            f"has successfully completed the Anti-Doping Education Quiz")
+        c.drawCentredString(width/2, height-4.5*inch, 
+            f"with a score of {score}%")
+            
+        # Add date
+        c.setFont("Helvetica", 14)
+        date_str = timestamp.strftime("%B %d, %Y")
+        c.drawCentredString(width/2, height-5.5*inch, f"Date: {date_str}")
+        
+        # Add blockchain verification if available
+        if token_id:
+            c.setFont("Helvetica", 10)
+            c.drawCentredString(width/2, 2*inch, 
+                f"Blockchain Verification Token: {token_id}")
+        
+        # Save the PDF
+        c.save()
+        app.logger.info(f"Generated certificate: {filename}")
+        return filename
+        
+    except Exception as e:
+        app.logger.error(f"Error generating certificate PDF: {str(e)}")
+        raise
+
+from simulator import FitnessSimulator
+
+# Initialize simulator
+simulator = FitnessSimulator(socketio)
+
+# Digital Twin Routes
+@app.route('/api/athlete/start_simulation/<athlete_id>', methods=['POST'])
+def start_simulation(athlete_id):
+    try:
+        simulator.start_simulation(athlete_id)
+        return jsonify({
+            'success': True,
+            'message': f'Started simulation for athlete {athlete_id}'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/athlete/metrics/<athlete_id>', methods=['GET'])
+def get_athlete_metrics(athlete_id):
+    try:
+        data = simulator.athlete_data.get(athlete_id)
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Athlete not found'
+            }), 404
+            
+        return jsonify({
+            'success': True,
+            'data': {
+                'heart_rate': round(data['heart_rate']),
+                'hrv': round(data['hrv']),
+                'steps': int(data['steps']),
+                'sleep_hours': round(data['sleep_hours'], 1),
+                'activity': data['current_activity'],
+                'calories_burned': int(data['calories_burned']),
+                'stress_level': round(data['stress_level']),
+                'recovery_score': round(data['recovery_score']),
+                'hydration_level': round(data['hydration_level']),
+                'is_sleeping': data['is_sleeping']
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/digital_twin/<athlete_id>')
+def digital_twin_dashboard(athlete_id):
+    return render_template('digital_twin.html', athlete_id=athlete_id)
+
+# Language and Notification Routes
+@app.route('/change-language', methods=['POST'])
+@login_required
+def change_language():
+    data = request.get_json()
+    language = data.get('language')
+    if language in ['en', 'es', 'fr', 'de', 'it', 'pt', 'hi', 'zh']:
+        session['language'] = language
+    return jsonify({'status': 'success'})
+
+@app.route('/mark-notifications-read', methods=['POST'])
+@login_required
+def mark_notifications_read():
+    try:
+        notifications = Notification.query.filter_by(
+            user_id=current_user.id,
+            read=False
+        ).all()
+        
+        for notification in notifications:
+            notification.read = True
+        
+        db.session.commit()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/register-push', methods=['POST'])
+@login_required
+def register_push():
+    try:
+        subscription_json = request.get_json()
+        user = User.query.get(current_user.id)
+        user.push_subscription = json.dumps(subscription_json)
+        db.session.commit()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/toggle-high-contrast', methods=['POST'])
+@login_required
+def toggle_high_contrast():
+    session['high_contrast'] = not session.get('high_contrast', False)
+    return jsonify({'status': 'success'})
+
+@app.route('/toggle-large-text', methods=['POST'])
+@login_required
+def toggle_large_text():
+    session['large_text'] = not session.get('large_text', False)
+    return jsonify({'status': 'success'})
+
+# Context Processors
+@app.context_processor
+def inject_notifications():
+    if current_user.is_authenticated:
+        notifications = Notification.query.filter_by(
+            user_id=current_user.id
+        ).order_by(Notification.created_at.desc()).limit(10).all()
+        
+        unread_count = Notification.query.filter_by(
+            user_id=current_user.id,
+            read=False
+        ).count()
+        
+        return {
+            'notifications': notifications,
+            'unread_notifications_count': unread_count
+        }
+    return {}
+
+@app.context_processor
+def inject_languages():
+    return {'supported_languages': ['en', 'es', 'fr', 'de', 'it', 'pt', 'hi', 'zh']}
+
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()  # Create all database tables
     app.run(debug=True)
